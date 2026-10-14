@@ -6,6 +6,7 @@ refresh token and signed into the access token, so data sources can be limited p
 import base64
 import hashlib
 import html
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode, urlsplit
@@ -165,9 +166,37 @@ def _resolve_provider(client: OAuthClient, posted: str) -> str | None:
     return p if p in PROVIDERS else None
 
 
+GEMINI_REDIRECT_HOST = "oauth-redirect.googleusercontent.com"
+_GEMINI_PATH = re.compile(r"/r/user_bound_custom-mcp-\d+-(?P<slug>[A-Za-z0-9_-]+)")
+
+
+def gemini_redirect_allowed(uri: str) -> bool:
+    """Gemini's callback is per user/connector: /r/user_bound_custom-mcp-<id>-<server name>.
+    Accept Google's redirector only, and only for a connector that points at THIS server (the
+    slug is our public host with dots as underscores)."""
+    try:
+        u = urlsplit(uri)
+        port = u.port
+    except ValueError:
+        return False
+    if (u.scheme != "https" or u.hostname != GEMINI_REDIRECT_HOST or port is not None
+            or u.username is not None or u.password is not None or u.query or u.fragment):
+        return False
+    m = _GEMINI_PATH.fullmatch(u.path)
+    host = urlsplit(get_settings().public_base_url).hostname or ""
+    return bool(m) and m["slug"] == host.replace(".", "_")
+
+
 async def _validate_authz(db, client_id, redirect_uri, challenge, method, response_type):
     client = await db.get(OAuthClient, client_id)
-    if not client or redirect_uri not in client.redirect_uris:
+    if client is None and client_id == get_settings().gemini_client_id \
+            and gemini_redirect_allowed(redirect_uri):
+        # Built-in client: not stored, so it survives a wiped database.
+        client = OAuthClient(client_id=client_id, client_name="Gemini", redirect_uris=[],
+                             provider_hint="gemini")
+    elif not client or redirect_uri not in client.redirect_uris:
+        client = None
+    if client is None:
         raise HTTPException(400, "invalid client or redirect_uri")
     if response_type != "code" or method != "S256" or not challenge:
         raise HTTPException(400, "PKCE S256 and response_type=code required")

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block body %}
+<h2>Connect an app</h2>
+<p class="muted">Claude and ChatGPT register themselves, so they only need the server URL. Gemini's
+  custom connector form asks for the values below. You then sign in with your own account here.</p>
+
+<div class="card">
+  <h3>Gemini (Google)</h3>
+  <label class="muted">MCP server URL</label>
+  <input readonly value="{{ mcp_url }}" onclick="this.select()">
+  <label class="muted">OAuth client ID</label>
+  <input readonly value="{{ gemini_client_id }}" onclick="this.select()">
+  <label class="muted">Client secret</label>
+  <p>Leave empty (PKCE is used instead).</p>
+  <label class="muted">Authorization URL</label>
+  <input readonly value="{{ base }}/oauth/authorize" onclick="this.select()">
+  <label class="muted">Token URL</label>
+  <input readonly value="{{ base }}/oauth/token" onclick="this.select()">
+  <p class="muted">When Gemini sends you to the sign-in page, use your Medkart Data Connector email and
+    password. Gemini can only reach data sources whose owner enabled Gemini on the Data sources page.</p>
+</div>
+
+<div class="card">
+  <h3>Claude / ChatGPT</h3>
+  <label class="muted">MCP server URL</label>
+  <input readonly value="{{ mcp_url }}" onclick="this.select()">
+  <p class="muted">No client ID needed.</p>
+</div>
+{% endblock %}

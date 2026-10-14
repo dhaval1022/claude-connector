@@ -20,12 +20,14 @@ class Settings(BaseSettings):
         # callback (/connector/oauth/<id>), so both are allowed; matching is structural.
         "https://chatgpt.com/connector_platform_oauth_redirect",
         "https://chatgpt.com/connector/oauth/",
-        # Gemini custom MCP connector (per-connector callback; exact path)
-        "https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-106010816662739304230-claude-connector-c4ce_onrender_com",
         "http://localhost",
         "http://127.0.0.1",
         "http://[::1]",
     ]
+    # Fixed client_id for Gemini's custom MCP connector form (it asks for one instead of
+    # registering itself). A public client: PKCE is mandatory and there is no secret. Its redirect
+    # is accepted only for Google's redirector with this server's own name in the path.
+    gemini_client_id: str = "medkart-gemini"
     default_max_rows: int = 500
     hard_max_rows: int = 10_000
     query_timeout_s: int = 60

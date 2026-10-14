@@ -36,6 +36,15 @@ async def _page_tokens(request, ctx, db, error="", created=None):
                  max_active=api_tokens.MAX_ACTIVE)
 
 
+@router.get("/account/connect")
+async def connect_info(request: Request, ctx: Ctx = Depends(_require)):
+    """Values to paste into an AI app's custom-connector form (no secrets here)."""
+    s = get_settings()
+    base = s.public_base_url.rstrip("/")
+    return _page(request, "connect.html", ctx, mcp_url=base + "/mcp", base=base,
+                 gemini_client_id=s.gemini_client_id)
+
+
 @router.get("/account/tokens")
 async def tokens_list(request: Request, ctx: Ctx = Depends(_require),
                       db: AsyncSession = Depends(get_session)):

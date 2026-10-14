@@ -21,6 +21,7 @@
 {% if ctx %}<span><a href="/sources">Data sources</a>
   {% if ctx.user.role == "admin" %}<a href="/admin/users">Users</a> <a href="/admin/audit">Audit</a>{% endif %}
   {{ ctx.user.email }}
+  <a href="/account/connect">Connect</a>
   <a href="/account/tokens">API tokens</a>
   <a href="/account/password">Password</a>
   <form class="inline" method="post" action="/logout">
