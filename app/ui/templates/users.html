@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block body %}
+<h2>Users</h2>
+{% if notice %}<p class="ok">{{ notice }}</p>{% endif %}
+{% if error %}<p class="err">{{ error }}</p>{% endif %}
+
+<div class="card">
+  <h3>Create user</h3>
+  <form method="post" action="/admin/users">
+    <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
+    <input name="email" type="email" placeholder="Email" required>
+    <input name="name" placeholder="Full name" required>
+    <select name="role">{% for r in roles %}<option>{{ r }}</option>{% endfor %}</select>
+    <button>Create</button>
+  </form>
+  <p class="muted">A temporary password is generated; the user must change it on first login.</p>
+</div>
+
+<table>
+  <tr><th>Email</th><th>Name</th><th>Role</th><th>Status</th><th>Last login</th><th></th></tr>
+  {% for u in users %}
+  <tr>
+    <td>{{ u.email }}</td><td>{{ u.name }}</td><td>{{ u.role }}</td>
+    <td>{{ "active" if u.is_active else "disabled" }}</td>
+    <td>{{ u.last_login.strftime("%Y-%m-%d %H:%M") if u.last_login else "never" }}</td>
+    <td>
+      <form class="inline" method="post" action="/admin/users/{{ u.id }}/toggle">
+        <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
+        <button>{{ "Disable" if u.is_active else "Enable" }}</button></form>
+      <form class="inline" method="post" action="/admin/users/{{ u.id }}/reset"
+            onsubmit="return confirm('Reset password for {{ u.email }}?')">
+        <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
+        <button>Reset password</button></form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

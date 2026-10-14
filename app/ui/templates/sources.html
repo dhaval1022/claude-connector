@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block body %}
+<h2>My data sources</h2>
+{% if notice %}<p class="ok">{{ notice }}</p>{% endif %}
+{% if error %}<p class="err">{{ error }}</p>{% endif %}
+
+{% for s in sources %}
+<div class="card">
+  <strong>{{ s.name }}</strong> <span class="muted">· {{ s.engine }} · {{ s.status }}
+    · schema cached {{ s.schema_cached_at.strftime("%Y-%m-%d %H:%M") if s.schema_cached_at else "never" }}
+    · {% set n = namespace(t=0) %}{% for sch in (s.schema_cache.schemas.values() if s.schema_cache else []) %}{% set n.t = n.t + sch|length %}{% endfor %}{{ n.t }} tables</span>
+  <form method="post" action="/sources/{{ s.id }}/masked">
+    <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
+    <label class="muted">Masked columns (Claude cannot read these; comma-separated, e.g. phone,email)</label>
+    <input name="columns" value="{{ (s.masked_columns or [])|join(', ') }}">
+    <button>Save masked columns</button>
+  </form>
+  <form class="inline" method="post" action="/sources/{{ s.id }}/refresh">
+    <input type="hidden" name="csrf" value="{{ ctx.csrf }}"><button>Refresh schema</button></form>
+  <form class="inline" method="post" action="/sources/{{ s.id }}/delete"
+        onsubmit="return confirm('Remove this data source?')">
+    <input type="hidden" name="csrf" value="{{ ctx.csrf }}"><button>Remove</button></form>
+</div>
+{% else %}
+<p class="muted">No data sources yet. Add one below.</p>
+{% endfor %}
+
+<div class="card">
+  <h3>Upload CSV / Excel files</h3>
+  <p class="muted">Each CSV becomes a table; each Excel sheet becomes a table. Files are
+    snapshots (re-upload to update). Text codes such as 00123 are kept exactly as written.</p>
+  <form method="post" action="/sources/upload" enctype="multipart/form-data">
+    <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
+    <input name="name" placeholder="Name (e.g. March sales files)" required>
+    <input type="file" name="files" accept=".csv,.txt,.xlsx,.xlsm" multiple required>
+    <button>Upload &amp; load</button>
+  </form>
+</div>
+
+<div class="card">
+  <h3>Connect a database</h3>
+  <p class="muted">Use a <strong>read-only database account</strong>. The connector only runs
+    SELECT queries, but a read-only account is your strongest safeguard. Credentials are
+    stored encrypted and are never shown to Claude.</p>
+  <form method="post" action="/sources">
+    <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
+    <input name="name" placeholder="Name (e.g. Sales warehouse)" value="{{ form.name }}" required>
+    <select name="engine">
+      {% for key, label in engines.items() %}
+      <option value="{{ key }}" {{ "selected" if form.engine == key }}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <input name="host" placeholder="Host" value="{{ form.host }}">
+    <input name="port" placeholder="Port (default for engine if empty)" value="{{ form.port }}">
+    <input name="database" placeholder="Database name" value="{{ form.database }}" required>
+    <input name="username" placeholder="Username" value="{{ form.username }}">
+    <input name="password" type="password" placeholder="Password" autocomplete="new-password">
+    <p class="muted" style="margin-bottom:0">Amazon Athena only (leave the host, user and password
+      above empty; "Database name" is the Glue database):</p>
+    <input name="region" placeholder="AWS region (e.g. ap-south-1)" value="{{ form.region }}">
+    <input name="s3_output" placeholder="Query results location (s3://bucket/prefix/)" value="{{ form.s3_output }}">
+    <input name="workgroup" placeholder="Workgroup (default: primary)" value="{{ form.workgroup }}">
+    <input name="access_key_id" placeholder="Access key id (optional; blank = server IAM role)" value="{{ form.access_key_id }}" autocomplete="off">
+    <input name="secret_access_key" type="password" placeholder="Secret access key" autocomplete="new-password">
+    <label><input type="checkbox" name="trust_server_cert" value="1" style="width:auto"
+      {{ "checked" if form.trust_server_cert }}> SQL Server: trust server certificate</label>
+    <button>Test &amp; connect</button>
+  </form>
+</div>
+{% endblock %}

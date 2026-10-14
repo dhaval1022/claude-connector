@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card">
+  <h2>Welcome, {{ ctx.user.name }}</h2>
+  <p>To use this connector, add it in Claude (Settings → Connectors → Add custom connector)
+     and sign in with this account.</p>
+</div>
+{% endblock %}

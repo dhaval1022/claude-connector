@@ -1,0 +1,52 @@
+# --- secrets & local config (never commit) ------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- runtime data: databases, uploads, exports, logs -----------------------------------------
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.duckdb
+*.duckdb.wal
+/data/
+/exports/
+# files written by generated analysis scripts
+/output/
+/logs/
+*.log
+access.log
+
+# --- Python ----------------------------------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# --- tooling caches --------------------------------------------------------------------------
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# --- editors / OS ----------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Claude Code local state ------------------------------------------------------------------
+.claude/settings.local.json

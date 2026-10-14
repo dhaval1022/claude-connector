@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Medkart Data Connector{% endblock %}</title>
+<style>
+  body{font:15px system-ui,sans-serif;margin:0;color:#1a1a1a;background:#fafafa}
+  header{display:flex;justify-content:space-between;align-items:center;padding:12px 20px;
+         background:#fff;border-bottom:1px solid #e3e3e3}
+  main{max-width:860px;margin:24px auto;padding:0 16px}
+  table{width:100%;border-collapse:collapse;background:#fff}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #eee}
+  input,select,button{font:inherit;padding:8px;margin:4px 0}
+  input{width:100%;box-sizing:border-box}
+  button{cursor:pointer}
+  form.inline{display:inline}
+  .card{background:#fff;border:1px solid #e3e3e3;border-radius:8px;padding:16px;margin-bottom:20px}
+  .err{color:#b00020}.ok{background:#e8f5e9;padding:10px;border-radius:6px;word-break:break-all}
+  .muted{color:#777}
+</style></head><body>
+<header><strong>Medkart Data Connector</strong>
+{% if ctx %}<span><a href="/sources">Data sources</a>
+  {% if ctx.user.role == "admin" %}<a href="/admin/users">Users</a> <a href="/admin/audit">Audit</a>{% endif %}
+  {{ ctx.user.email }}
+  <a href="/account/password">Password</a>
+  <form class="inline" method="post" action="/logout">
+    <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
+    <button>Sign out</button></form></span>{% endif %}
+</header><main>{% block body %}{% endblock %}</main></body></html>

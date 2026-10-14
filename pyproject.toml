@@ -1,0 +1,39 @@
+[project]
+name = "claude-connector"
+version = "0.1.0"
+description = "Remote MCP server: per-user data sources, guarded SQL, business insights for Claude"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "mcp>=1.9,<2",
+  "sqlalchemy[asyncio]>=2.0",
+  "alembic>=1.13",
+  "aiosqlite>=0.20",
+  "pydantic-settings>=2.4",
+  "argon2-cffi>=23.1",
+  "cryptography>=43",
+  "pyjwt>=2.9",
+  "jinja2>=3.1",
+  "python-multipart>=0.0.9",
+  "sqlglot>=25",
+  "duckdb>=1.0",
+  "prometheus-client>=0.20",
+  "openpyxl>=3.1",
+]
+
+[project.optional-dependencies]
+engines = [
+  "psycopg2-binary", "pymysql", "pyodbc", "google-cloud-bigquery", "snowflake-connector-python",
+  "boto3", "clickhouse-connect",
+]
+metadata-postgres = ["asyncpg>=0.29"]
+dev = ["pandas>=2.0", "numpy", "pytest", "pytest-asyncio", "httpx", "ruff", "mypy", "bandit"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = ["integration: needs real database servers via CC_TEST_*_URL env vars (skipped if unset)"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100

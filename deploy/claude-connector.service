@@ -1,0 +1,34 @@
+# systemd unit (Linux). Install:
+#   sudo useradd --system --home /opt/claude-connector --shell /usr/sbin/nologin connector
+#   sudo cp deploy/claude-connector.service /etc/systemd/system/
+#   sudo cp .env /etc/claude-connector.env && sudo chmod 600 /etc/claude-connector.env
+#   sudo chown connector /etc/claude-connector.env
+#   sudo systemctl daemon-reload && sudo systemctl enable --now claude-connector
+[Unit]
+Description=Medkart Claude data connector (remote MCP server)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=connector
+WorkingDirectory=/opt/claude-connector
+EnvironmentFile=/etc/claude-connector.env
+# Apply migrations before every start (idempotent).
+ExecStartPre=/opt/claude-connector/.venv/bin/python -m app.cli migrate
+# ONE worker: rate limits and circuit breakers are in-process state.
+ExecStart=/opt/claude-connector/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 \
+    --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1 --no-server-header
+Restart=on-failure
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/claude-connector/data /opt/claude-connector
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,30 @@
+# Reverse proxy with automatic HTTPS (Caddy 2; works on Windows and Linux).
+# Replace the hostname. Caddy obtains and renews the certificate itself (needs ports 80/443
+# reachable for the ACME challenge, and DNS pointing here).
+connector.example.com {
+	encode zstd gzip
+
+	# Streamable-HTTP MCP responses can be long-lived; do not buffer or cut them short.
+	reverse_proxy 127.0.0.1:8000 {
+		flush_interval -1
+		transport http {
+			response_header_timeout 15m
+		}
+	}
+
+	# Large CSV/Excel uploads are capped by the app (CONNECTOR_MAX_UPLOAD_MB); allow a bit more here.
+	request_body {
+		max_size 150MB
+	}
+
+	# Keep tokens out of access logs: /files/<token> and OAuth query strings.
+	log {
+		output file access.log
+		format filter {
+			wrap json
+			fields {
+				request>uri delete
+			}
+		}
+	}
+}

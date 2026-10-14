@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block body %}
+<h2>Audit log</h2>
+<p class="muted">Latest 200 tool calls. Result data is never stored, only the SQL and row counts.</p>
+<form method="get" action="/admin/audit" style="display:flex;gap:8px;flex-wrap:wrap">
+  <select name="status" style="width:auto">
+    <option value="">any status</option>
+    {% for s in statuses %}<option {{ "selected" if s == f_status }}>{{ s }}</option>{% endfor %}
+  </select>
+  <input name="tool" placeholder="tool (e.g. run_query)" value="{{ f_tool }}" style="width:auto">
+  <input name="user" placeholder="user email" value="{{ f_user }}" style="width:auto">
+  <button>Filter</button>
+</form>
+<table>
+  <tr><th>Time (UTC)</th><th>User</th><th>Tool</th><th>Status</th><th>Rows</th><th>ms</th>
+      <th>SQL / error</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td>{{ r.ts.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+    <td>{{ emails.get(r.user_id, "-") }}</td>
+    <td>{{ r.tool }}</td>
+    <td class="{{ 'err' if r.status != 'ok' }}">{{ r.status }}</td>
+    <td>{{ r.row_count if r.row_count is not none else "" }}</td>
+    <td>{{ r.elapsed_ms if r.elapsed_ms is not none else "" }}</td>
+    <td style="font-family:monospace;font-size:12px;word-break:break-all">
+      {{ (r.sql_text or "")[:300] }}{% if r.error %}<br><span class="err">{{ r.error[:200] }}</span>{% endif %}
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="7" class="muted">No matching events.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}
