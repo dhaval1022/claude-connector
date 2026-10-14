@@ -8,6 +8,7 @@ from sqlalchemy import text
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app import maintenance
+from app.bootstrap import ensure_bootstrap_admin
 from app.auth.mcp_auth import McpAuthMiddleware
 from app.auth.oauth_server import router as oauth_router
 from app.config import get_settings
@@ -32,6 +33,7 @@ async def lifespan(_: FastAPI):
         raise RuntimeError("CONNECTOR_JWT_SECRET must be set to a random string of 32+ chars")
     if not s.master_key:
         raise RuntimeError("CONNECTOR_MASTER_KEY is not set (python -m app.cli gen-key)")
+    await ensure_bootstrap_admin()
     task = asyncio.create_task(maintenance.loop())
     try:
         async with mcp.session_manager.run():

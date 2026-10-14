@@ -81,6 +81,14 @@ Run **one** worker behind an HTTPS reverse proxy.
 **Why one worker**: rate limits and circuit breakers are in-process. For more than one process
 or host, move that state to Redis first.
 
+### First admin without a shell
+
+On a host where you cannot run `create-admin`, set `CONNECTOR_BOOTSTRAP_ADMIN_EMAIL` and
+`CONNECTOR_BOOTSTRAP_ADMIN_PASSWORD` (10+ chars). At startup, **only if the database has no users**,
+that admin is created and must change the password at first sign-in. It never runs again once any
+user exists and never resets an existing password, so remove the variables after your first login.
+Run the pre-deploy `python -m app.cli migrate` first.
+
 ### Adding it to Claude
 
 Settings → Connectors → *Add custom connector* → URL `https://<your-host>/mcp`. Claude opens a

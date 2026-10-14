@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     allowed_hosts: list[str] = []      # extra Host header values besides public_base_url's
     metrics_token: str = ""            # /metrics requires this bearer token (404 if unset)
     log_json: bool = True
+    # Optional first admin, created at startup ONLY if there are no users (see app/bootstrap.py)
+    bootstrap_admin_email: str = ""
+    bootstrap_admin_password: str = ""
+    bootstrap_admin_name: str = "Administrator"
 
 
 @lru_cache
