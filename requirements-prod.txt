@@ -1,0 +1,26 @@
+# Runtime dependencies for deployment (UTF-8, Linux and Windows). Versions match requirements.txt.
+# Install:  pip install -r requirements-prod.txt
+# Deliberately NOT here: tests/dev tools (pytest, ruff, mypy, bandit, pandas), pywin32.
+# SQL Server support also needs `pyodbc` AND the OS package "ODBC Driver 18 for SQL Server";
+# most managed Python hosts cannot install that, so it is left out. Add `pyodbc==5.3.0` where you can.
+
+fastapi==0.143.0
+uvicorn[standard]==0.54.0
+mcp==1.30.0
+SQLAlchemy[asyncio]==2.1.4   # the asyncio extra pulls in greenlet, which the app needs
+alembic==1.20.0
+aiosqlite==0.22.1
+asyncpg==0.32.0            # PostgreSQL metadata database (postgresql+asyncpg://...)
+psycopg2-binary==2.9.13    # PostgreSQL data sources
+PyMySQL==1.2.3             # MySQL / MariaDB data sources
+boto3==1.43.113            # Amazon Athena data sources
+duckdb==1.5.6              # CSV / Excel data sources
+openpyxl==3.1.5
+sqlglot==30.22.0
+pydantic-settings==2.15.0
+argon2-cffi==25.1.0
+cryptography==50.0.2
+PyJWT==2.15.1
+Jinja2==3.1.6
+python-multipart==0.0.32
+prometheus_client==0.26.0
