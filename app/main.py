@@ -15,13 +15,16 @@ from app.config import get_settings
 from app.db.session import engine
 from app.exports.routes import router as exports_router
 from app.mcp_tools import analysis, data, exports, scripts, semantic  # noqa: F401
+from app.mcp_tools.schema_compat import apply_lean_schemas
 from app.mcp_tools.server import mcp
 from app.observability import (RequestContextMiddleware, allowed_hosts, configure_logging,
                                metrics_body)
 from app.ui.audit_routes import router as audit_router
 from app.ui.routes import router as ui_router
 from app.ui.sources_routes import router as sources_router
+from app.ui.tokens_routes import router as tokens_router
 
+apply_lean_schemas(mcp)  # publish Gemini/OpenAI-safe schemas + tool annotations
 mcp_app = mcp.streamable_http_app()  # creates the session manager used below
 
 
@@ -42,15 +45,31 @@ async def lifespan(_: FastAPI):
         task.cancel()
 
 
+class McpPathMiddleware:
+    """Serve /mcp and /mcp/ identically. Starlette would answer a bare /mcp with a 307 redirect to
+    /mcp/, and many MCP clients (and proxies) do not follow redirects on a POST, so a user who
+    pastes https://host/mcp would get a broken connector."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope.get("path") == "/mcp":
+            scope = {**scope, "path": "/mcp/", "raw_path": b"/mcp/"}
+        await self.app(scope, receive, send)
+
+
 app = FastAPI(title="Medkart Data Connector", lifespan=lifespan, docs_url=None, redoc_url=None,
               openapi_url=None)
 app.include_router(oauth_router)
 app.include_router(ui_router)
 app.include_router(sources_router)
+app.include_router(tokens_router)
 app.include_router(audit_router)
 app.include_router(exports_router)
 app.mount("/mcp", McpAuthMiddleware(mcp_app))
 # Order matters: the last middleware added is the outermost.
+app.add_middleware(McpPathMiddleware)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts())
 app.add_middleware(RequestContextMiddleware)
 

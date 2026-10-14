@@ -1,5 +1,7 @@
-"""Discovery + query tools. Every tool resolves the source through get_owned(), so a user can
-only ever reach their own data sources."""
+"""Discovery + query tools. Every tool resolves its data source through _load(), which enforces
+rate limits, OWNERSHIP (a user can only reach their own sources) and the per-source PROVIDER
+allow-list (only apps the owner enabled). Do not read a source any other way: the matrix in
+tests/test_provider_enforcement.py fails if a source-taking tool bypasses it."""
 import difflib
 import re
 from datetime import datetime, timezone
@@ -12,7 +14,8 @@ from app.config import get_settings
 from app.db.models import DataSource
 from app.db.session import SessionLocal
 from app.guard.sql_validator import QueryRejected, validate
-from app.mcp_tools.server import current_user_id, mcp
+from app.mcp_tools.server import current_provider, current_user_id, mcp
+from app.providers import LABELS, is_allowed
 from app.ratelimit import enforce
 from app.semantic import service as semantic
 from app.sources.service import (SourceError, clean_error, connector_for, find_table,
@@ -27,6 +30,13 @@ async def _load(source_id: str) -> DataSource:
         src = await get_owned(db, current_user_id.get(), source_id)
     if not src:
         raise ValueError(NOT_FOUND)
+    provider = current_provider.get()
+    if not is_allowed(src.allowed_providers, provider):
+        await audit(user_id=current_user_id.get(), tool="provider_check", source_id=src.id,
+                    status="denied", error=f"provider={provider}")
+        raise ValueError(
+            f"This data source is not enabled for {LABELS[provider]}. Its owner can enable it "
+            "on the Data sources page of the connector.")
     return src
 
 
@@ -222,6 +232,7 @@ async def run_query(source_id: str, sql: str, max_rows: int = 500) -> dict:
 async def refresh_schema_cache(source_id: str) -> dict:
     """Re-read the database's tables/columns. Use after the database structure changed or
     when a table you expect is missing."""
+    await _load(source_id)      # rate limit + ownership + provider allow-list (see _load)
     async with SessionLocal() as db:
         src = await get_owned(db, current_user_id.get(), source_id)
         if not src:

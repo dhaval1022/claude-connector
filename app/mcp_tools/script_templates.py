@@ -22,7 +22,7 @@ import pandas as pd
 
 EXPECTED = {expected!r}      # export manifest: filename, rows, sha256, columns, kinds
 SOURCE_SQL = {sql!r}
-DOWNLOAD_URL = {url!r}       # short-lived; ask Claude for a new link if it has expired
+DOWNLOAD_URL = {url!r}       # short-lived; ask your AI assistant for a new link if it has expired
 COLS = {cols!r}              # role -> column name in the export
 PARAMS = {params!r}
 OUT = Path("output")
@@ -36,7 +36,7 @@ def load_export(path_arg=None):
             urllib.request.urlretrieve(DOWNLOAD_URL, path)
         except Exception as e:
             sys.exit(f"Could not download the export ({{e}}). Links expire after about 30 "
-                     "minutes: ask Claude for a new link (get_export_link), or pass --file PATH.")
+                     "minutes: ask your AI assistant for a new link (get_export_link), or pass --file PATH.")
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     if digest != EXPECTED["sha256"]:
         sys.exit("CHECKSUM MISMATCH: the file is incomplete or was modified. Do not trust any "

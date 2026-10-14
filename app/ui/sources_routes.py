@@ -4,7 +4,9 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.logger import audit
 from app.db.models import DataSource
+from app.providers import LABELS, clean_allowed
 from app.db.session import get_session
 from app.sources import service
 from app.ui.routes import Ctx, _check_csrf, _page, _require
@@ -16,7 +18,7 @@ async def _list(request, ctx, db, notice="", error="", form=None):
     sources = (await db.execute(select(DataSource).where(DataSource.owner_id == ctx.user.id)
                                 .order_by(DataSource.name))).scalars().all()
     return _page(request, "sources.html", ctx, sources=sources, notice=notice, error=error,
-                 engines=service.available_engines(), form=form or {})
+                 engines=service.available_engines(), form=form or {}, providers=LABELS)
 
 
 @router.get("/sources")
@@ -80,6 +82,24 @@ async def source_refresh(request: Request, source_id: str, csrf: str = Form(),
     except service.SourceError as e:
         return await _list(request, ctx, db, error=str(e))
     return await _list(request, ctx, db, notice=f"Schema refreshed for '{src.name}'.")
+
+
+@router.post("/sources/{source_id}/providers")
+async def source_providers(request: Request, source_id: str, csrf: str = Form(),
+                           providers: list[str] = Form(default=[]),
+                           ctx: Ctx = Depends(_require), db: AsyncSession = Depends(get_session)):
+    _check_csrf(ctx, csrf)
+    src = await _owned_or_404(db, ctx, source_id)
+    old, new = list(src.allowed_providers or []), clean_allowed(providers)
+    src.allowed_providers = new
+    await db.commit()
+    await audit(user_id=ctx.user.id, tool="ui:set_providers", source_id=src.id, status="ok",
+                sql=f"allowed_providers: {old} -> {new}")
+    extra = [LABELS[p] for p in new if p != "claude"]
+    msg = (f"'{src.name}' is now usable from: {', '.join(LABELS[p] for p in new) or 'no app'}.")
+    if extra:
+        msg += (" Query results from this source will be sent to " + ", ".join(extra) + ".")
+    return await _list(request, ctx, db, notice=msg)
 
 
 @router.post("/sources/{source_id}/masked")

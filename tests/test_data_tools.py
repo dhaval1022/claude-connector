@@ -112,7 +112,7 @@ async def test_search_schema(env):
 
 async def test_tenant_isolation(env):
     current_user_id.set(env["b"])
-    assert await list_data_sources() == []
+    assert (await list_data_sources())["data_sources"] == []
     for call in (data.get_schema_overview(env["src"]),
                  data.run_query(env["src"], "SELECT 1"),
                  data.describe_table(env["src"], "orders")):
@@ -122,7 +122,7 @@ async def test_tenant_isolation(env):
         assert await service.get_owned(s, env["b"], env["src"]) is None
         assert await service.delete_source(s, env["b"], env["src"]) is False
     current_user_id.set(env["a"])
-    assert len(await list_data_sources()) == 1
+    assert len((await list_data_sources())["data_sources"]) == 1
 
 
 async def test_credentials_encrypted_at_rest(env):

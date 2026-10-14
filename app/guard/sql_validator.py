@@ -36,7 +36,7 @@ DENY_TABLES = {"pg_shadow", "pg_authid", "pg_user_mapping", "pg_roles", "sql_log
 
 
 class QueryRejected(ValueError):
-    """The SQL is not allowed; the message is safe to show to Claude/the user."""
+    """The SQL is not allowed; the message is safe to show to the assistant/the user."""
 
 
 @dataclass

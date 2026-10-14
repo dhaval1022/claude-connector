@@ -25,12 +25,15 @@ def _audience() -> str:
     return get_settings().public_base_url.rstrip("/") + "/mcp"
 
 
-def issue_access_token(user_id: str, client_id: str) -> str:
+def issue_access_token(user_id: str, client_id: str, provider: str = "claude") -> str:
+    """`prv` = which AI provider this sign-in was for (app/providers.py). It is signed, so a
+    client cannot change it; tokens issued before providers existed have no `prv` and are
+    treated as Claude's."""
     s = get_settings()
     now = int(time.time())
     return jwt.encode(
-        {"sub": user_id, "cid": client_id, "iat": now, "exp": now + s.access_token_ttl_s,
-         "aud": _audience()},
+        {"sub": user_id, "cid": client_id, "prv": provider, "iat": now,
+         "exp": now + s.access_token_ttl_s, "aud": _audience()},
         s.jwt_secret, algorithm="HS256",
     )
 

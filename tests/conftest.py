@@ -1,7 +1,12 @@
 import os
 import tempfile
 
+from app.config import Settings  # noqa: E402
 from app.sources.crypto import generate_key  # noqa: E402
+
+# Hermetic tests: never read a developer's local .env (it would silently change behaviour,
+# e.g. ALLOW_LOOPBACK or a bootstrap admin). Settings come only from the variables below.
+Settings.model_config["env_file"] = None
 
 os.environ.update({
     "CONNECTOR_MASTER_KEY": generate_key(),

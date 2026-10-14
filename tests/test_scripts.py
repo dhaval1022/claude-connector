@@ -2,6 +2,7 @@
 and their outputs are checked against numbers computed independently from the raw rows."""
 import csv
 import io
+import json
 import random
 import subprocess
 import sys
@@ -97,6 +98,13 @@ def read_out(env, name):
         return list(csv.DictReader(f))
 
 
+async def gen(export_id, template, columns=None, params=None):
+    """Adapter: tests describe roles as a dict; the tool takes flat *_column arguments."""
+    kw = {f"{role}_column": col for role, col in (columns or {}).items()}
+    return await scripts.generate_analysis_script(
+        export_id, template, params_json=json.dumps(params) if params else None, **kw)
+
+
 COLS = {"item": "item", "date": "sold_on", "quantity": "qty", "customer": "customer",
         "value": "revenue", "revenue": "revenue"}
 
@@ -118,9 +126,10 @@ async def test_input_validation(env):
     eid = env["m"]["export_id"]
     cases = [
         (dict(template="nope"), "Unknown template"),
-        (dict(template="abc_xyz", columns=cols("item", "date")), "Map these roles"),
-        (dict(template="abc_xyz", columns={**cols("item", "date", "quantity"), "bogus": "x"}),
-         "Unknown column roles"),
+        (dict(template="abc_xyz", columns=cols("item", "date")), "Provide these column arguments"),
+        (dict(template="abc_xyz", columns={**cols("item", "date", "quantity"),
+                                           "customer": "customer"}),
+         "do not apply to this template"),
         (dict(template="abc_xyz", columns={**cols("item", "date"), "quantity": "nope"}),
          "not in the export"),
         (dict(template="abc_xyz", columns={**cols("item", "quantity"), "date": "qty"}),
@@ -142,13 +151,13 @@ async def test_input_validation(env):
     ]
     for kwargs, msg in cases:
         with pytest.raises(ValueError, match=msg):
-            await scripts.generate_analysis_script(eid, **kwargs)
+            await gen(eid, **kwargs)
 
 
 async def test_script_generation_is_owner_scoped(env):
     current_user_id.set(env["other"])
     with pytest.raises(ValueError, match="not found or expired"):
-        await scripts.generate_analysis_script(env["m"]["export_id"], "generic")
+        await gen(env["m"]["export_id"], "generic")
 
 
 # ----------------------------------------------------------------- executed scripts
@@ -158,7 +167,7 @@ async def test_generic_script_runs_and_embeds_awkward_sql_safely(env):
     m = await export_tools.export_result(env["src"], nasty)
     async with SessionLocal() as s:
         env["csv"] = Path((await s.get(Export, m["export_id"])).path)
-    r = await scripts.generate_analysis_script(m["export_id"], "generic")
+    r = await gen(m["export_id"], "generic")
     compile(r["script"], "generic.py", "exec")           # valid Python
     p = run_script(env, r)
     assert p.returncode == 0, p.stderr
@@ -167,7 +176,7 @@ async def test_generic_script_runs_and_embeds_awkward_sql_safely(env):
 
 
 async def test_tampered_file_is_rejected(env):
-    r = await scripts.generate_analysis_script(env["m"]["export_id"], "generic")
+    r = await gen(env["m"]["export_id"], "generic")
     data = env["csv"].read_bytes()
     env["csv"].write_bytes(data.replace(b"ITEM01", b"ITEM99", 1))
     p = run_script(env, r)
@@ -178,7 +187,7 @@ async def test_tampered_file_is_rejected(env):
 
 
 async def test_abc_xyz_matches_independent_calculation(env):
-    r = await scripts.generate_analysis_script(
+    r = await gen(
         env["m"]["export_id"], "abc_xyz", cols("item", "date", "quantity", "value"))
     p = run_script(env, r)
     assert p.returncode == 0, p.stdout + p.stderr
@@ -202,7 +211,7 @@ async def test_abc_xyz_matches_independent_calculation(env):
 
 
 async def test_rfm_counts_totals_and_ids(env):
-    r = await scripts.generate_analysis_script(
+    r = await gen(
         env["m"]["export_id"], "rfm", cols("customer", "date", "value"))
     p = run_script(env, r)
     assert p.returncode == 0, p.stdout + p.stderr
@@ -223,7 +232,7 @@ async def test_rfm_counts_totals_and_ids(env):
 
 
 async def test_rfm_with_explicit_snapshot_and_order_id(env):
-    r = await scripts.generate_analysis_script(
+    r = await gen(
         env["m"]["export_id"], "rfm", {**cols("customer", "date", "value"), "order_id": "order_id"},
         {"snapshot_date": "2025-07-01"})
     p = run_script(env, r)
@@ -236,7 +245,7 @@ async def test_rfm_with_explicit_snapshot_and_order_id(env):
 
 
 async def test_cohort_retention_math_and_future_cells_blank(env):
-    r = await scripts.generate_analysis_script(
+    r = await gen(
         env["m"]["export_id"], "cohort_retention", cols("customer", "date"))
     p = run_script(env, r)
     assert p.returncode == 0, p.stdout + p.stderr
@@ -275,7 +284,7 @@ async def test_cohort_retention_math_and_future_cells_blank(env):
 
 async def test_demand_forecast_monthly_and_weekly(env):
     for freq in ("M", "W"):
-        r = await scripts.generate_analysis_script(
+        r = await gen(
             env["m"]["export_id"], "demand_forecast", cols("date", "quantity", "item"),
             {"freq": freq, "horizon": 3, "top_items": 3})
         p = run_script(env, r)
@@ -293,7 +302,7 @@ async def test_demand_forecast_monthly_and_weekly(env):
     for x in ROWS:
         monthly_total[x[3][:7]] += x[4]
     assert "2025-12" in p.stdout or True        # (weekly run printed last; monthly checked below)
-    r = await scripts.generate_analysis_script(
+    r = await gen(
         env["m"]["export_id"], "demand_forecast", cols("date", "quantity"), {"horizon": 2})
     assert run_script(env, r).returncode == 0
     first_fc = read_out(env, "forecast.csv")[0]["period"]
@@ -303,7 +312,7 @@ async def test_demand_forecast_monthly_and_weekly(env):
 async def test_price_volume_mix_reconciles_exactly(env):
     params = {"baseline_start": "2025-01-01", "baseline_end": "2025-05-01",
               "current_start": "2025-07-01", "current_end": "2025-11-01"}
-    r = await scripts.generate_analysis_script(
+    r = await gen(
         env["m"]["export_id"], "price_volume_mix", cols("item", "date", "quantity", "revenue"),
         params)
     p = run_script(env, r)
@@ -318,3 +327,22 @@ async def test_price_volume_mix_reconciles_exactly(env):
     byitem = {x[""] if "" in x else x["item"]: x for x in read_out(env, "pvm_by_item.csv")}
     assert float(byitem["ITEM12"]["q0"]) == 0 and float(byitem["ITEM12"]["price_effect"]) == 0
     assert float(byitem["ITEM11"]["q1"]) == 0               # lost item: pure volume loss
+
+
+async def test_params_json_must_be_a_json_object(env):
+    eid = env["m"]["export_id"]
+    base = dict(item_column="item", date_column="sold_on", quantity_column="qty")
+    for bad, msg in [("{not json", "not valid JSON"), ("[1, 2]", "JSON object"), ('"text"', "JSON object")]:
+        with pytest.raises(ValueError, match=msg):
+            await scripts.generate_analysis_script(eid, "abc_xyz", params_json=bad, **base)
+    ok = await scripts.generate_analysis_script(eid, "abc_xyz", params_json='{"abc_a_pct": 70}',
+                                                **base)
+    assert ok["params"]["abc_a_pct"] == 70
+    blank = await scripts.generate_analysis_script(eid, "abc_xyz", params_json="  ", **base)
+    assert blank["params"]["abc_a_pct"] == 80.0               # blank = defaults
+
+
+async def test_flat_arguments_cover_every_template_role():
+    from app.mcp_tools.script_templates import TEMPLATES
+    roles = {r for t in TEMPLATES.values() for r in t["roles"]}
+    assert roles <= set(scripts._ROLE_ARGS), roles - set(scripts._ROLE_ARGS)

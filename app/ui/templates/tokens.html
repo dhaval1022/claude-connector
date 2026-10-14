@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block body %}
+<h2>API tokens</h2>
+<p class="muted">For apps that send a fixed bearer token instead of signing in through the browser (the
+  OpenAI API, some Gemini CLI builds, your own scripts). A token acts as <strong>you</strong> and can
+  use every data source you have enabled for that app. Treat it like a password: use one token per app,
+  and never put it into anything shared (for example a Custom GPT that other people can use).</p>
+{% if error %}<p class="err">{{ error }}</p>{% endif %}
+
+{% if created %}
+<div class="card" style="border-color:#2e7d32">
+  <strong>Token created: {{ created.name }}</strong> (expires {{ created.expires }})
+  <p class="err">Copy it now. It is shown only once and cannot be recovered.</p>
+  <pre style="white-space:pre-wrap;word-break:break-all;background:#f4f4f4;padding:10px">{{ created.snippet }}</pre>
+</div>
+{% endif %}
+
+<table>
+  <tr><th>Name</th><th>Starts with</th><th>For</th><th>Expires</th><th>Last used</th><th></th></tr>
+  {% for t in tokens %}
+  <tr>
+    <td>{{ t.name }}</td><td><code>{{ t.prefix }}…</code></td><td>{{ labels.get(t.provider, t.provider) }}</td>
+    <td>{{ t.expires_at.strftime("%Y-%m-%d") }}{{ " (revoked)" if t.revoked }}</td>
+    <td>{{ t.last_used_at.strftime("%Y-%m-%d %H:%M") if t.last_used_at else "never" }}</td>
+    <td>{% if not t.revoked %}
+      <form class="inline" method="post" action="/account/tokens/{{ t.id }}/revoke"
+            onsubmit="return confirm('Revoke this token? Apps using it stop working immediately.')">
+        <input type="hidden" name="csrf" value="{{ ctx.csrf }}"><button>Revoke</button></form>
+    {% endif %}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6" class="muted">No tokens yet.</td></tr>
+  {% endfor %}
+</table>
+
+<div class="card" style="margin-top:20px">
+  <h3>Create a token</h3>
+  <form method="post" action="/account/tokens">
+    <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
+    <input name="name" placeholder="Name (e.g. my Gemini CLI)" required maxlength="80">
+    <label class="muted">Which app will use it?</label>
+    <select name="provider" required>
+      {% for p in providers %}<option value="{{ p }}">{{ labels[p] }}</option>{% endfor %}
+    </select>
+    <label class="muted">Valid for</label>
+    <select name="days">
+      {% for d in lifetimes %}<option value="{{ d }}" {{ "selected" if d == 90 }}>{{ d }} days</option>{% endfor %}
+    </select>
+    <button>Create token</button>
+  </form>
+  <p class="muted">Up to {{ max_active }} active tokens. A data source is only reachable from an app that its
+    owner enabled on the Data sources page.</p>
+</div>
+{% endblock %}

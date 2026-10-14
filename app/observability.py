@@ -16,12 +16,41 @@ from app.config import get_settings
 request_id_var: ContextVar[str] = ContextVar("request_id", default="-")
 log = logging.getLogger("connector")
 
-TOOL_CALLS = Counter("connector_tool_calls_total", "Tool calls", ["tool", "status"])
+TOOL_CALLS = Counter("connector_tool_calls_total", "Tool calls", ["tool", "status", "provider"])
 TOOL_SECONDS = Histogram("connector_tool_seconds", "Tool call duration", ["tool"],
                          buckets=(.05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60, 120, 300))
 HTTP_REQUESTS = Counter("connector_http_requests_total", "HTTP requests", ["status"])
 _RID_OK = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 _FILES_PATH = re.compile(r"^/files/.+")
+_TOKEN_IN_PATH = re.compile(r"/files/[^\s\"'?#]+")
+# Generic names only count inside a query string, so ordinary text like "a code=1 b" is untouched.
+_SECRET_PARAM = re.compile(
+    r"([?&;](?:code|state|code_challenge|code_verifier|refresh_token|access_token|token|"
+    r"client_secret|password)=)[^&\s\"'#]+", re.IGNORECASE)
+# Names that are secrets wherever they appear.
+_BARE_SECRET = re.compile(
+    r"(\b(?:password|passwd|client_secret|secret_access_key|refresh_token|access_token|"
+    r"code_verifier)=)[^&\s\"'#]+", re.IGNORECASE)
+
+
+def scrub(text: str) -> str:
+    """Remove download tokens and secret-looking values from any log text."""
+    text = _TOKEN_IN_PATH.sub("/files/[redacted]", text)
+    return _BARE_SECRET.sub(r"\1[redacted]", _SECRET_PARAM.sub(r"\1[redacted]", text))
+
+
+class RedactFilter(logging.Filter):
+    """Last line of defence for ALL loggers (uvicorn, libraries, our own)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        clean = scrub(msg)
+        if clean != msg:
+            record.msg, record.args = clean, None
+        return True
 
 
 class JsonFormatter(logging.Formatter):
@@ -43,18 +72,22 @@ def configure_logging() -> None:
         return
     h = logging.StreamHandler()
     h._connector = True
+    h.addFilter(RedactFilter())
     h.setFormatter(JsonFormatter() if get_settings().log_json
                    else logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
     root.addHandler(h)
     root.setLevel(logging.INFO)
+    # uvicorn's access log prints the raw request line (download tokens, OAuth query strings).
+    # RequestContextMiddleware logs every request with those redacted instead.
+    logging.getLogger("uvicorn.access").disabled = True
 
 
 def log_event(event: str, **fields) -> None:
     log.info(event, extra={"event": event, **fields})
 
 
-def record_tool(tool: str, status: str, elapsed_ms: int | None) -> None:
-    TOOL_CALLS.labels(tool, status).inc()
+def record_tool(tool: str, status: str, elapsed_ms: int | None, provider: str = "claude") -> None:
+    TOOL_CALLS.labels(tool, status, provider).inc()
     if elapsed_ms is not None:
         TOOL_SECONDS.labels(tool).observe(elapsed_ms / 1000)
 

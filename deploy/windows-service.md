@@ -22,7 +22,7 @@ notepad .env
 
 # 4. Register the service (ONE worker: rate limits are in-process)
 nssm install ClaudeConnector C:\claude-connector\.venv\Scripts\python.exe
-nssm set ClaudeConnector AppParameters "-m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1 --no-server-header"
+nssm set ClaudeConnector AppParameters "-m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1 --no-server-header --no-access-log"
 nssm set ClaudeConnector AppDirectory C:\claude-connector
 nssm set ClaudeConnector Start SERVICE_AUTO_START
 mkdir C:\claude-connector\logs

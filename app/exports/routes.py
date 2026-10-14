@@ -18,7 +18,7 @@ async def download(token: str):
     local analysis script can fetch it. Disabled users and expired exports are refused."""
     claims = verify_link(token)
     if not claims:
-        raise HTTPException(403, "Link invalid or expired. Ask Claude for a new link.")
+        raise HTTPException(403, "Link invalid or expired. Ask your AI assistant for a new link.")
     async with SessionLocal() as db:
         e = (await db.execute(select(Export).where(
             Export.id == claims["sub"], Export.owner_id == claims["uid"]))).scalar_one_or_none()

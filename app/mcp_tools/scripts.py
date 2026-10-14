@@ -1,10 +1,12 @@
-"""Analysis-script tools. Claude presents the returned script to the user (as an artifact); the
+"""Analysis-script tools. The assistant presents the returned script to the user as a code file; the
 USER runs it locally, so database credentials never leave the server. The script embeds a
 manifest and refuses to run on an incomplete or modified file."""
+import json
 from datetime import date
 
 from app.exports import service as exports
 from app.mcp_tools.script_templates import (FOOTER, HEADER, REQUIRED_PARAMS, TEMPLATES)
+from app.mcp_tools.data import _load
 from app.mcp_tools.server import current_user_id, mcp
 
 
@@ -32,11 +34,14 @@ def _resolve_columns(template: dict, mapping: dict, columns: list[dict]) -> dict
     by_lower = {c["name"].lower(): c for c in columns}
     unknown = sorted(set(mapping) - set(roles))
     if unknown:
-        raise ValueError(f"Unknown column roles {unknown}. This template uses: {sorted(roles)}.")
+        raise ValueError(
+            f"These column arguments do not apply to this template: "
+            f"{', '.join(r + '_column' for r in unknown)}. It uses: "
+            f"{', '.join(r + '_column' for r in sorted(roles))}.")
     missing = [r for r, (req, _, _) in roles.items() if req and r not in mapping]
     if missing:
-        raise ValueError("Map these roles to export columns: " + "; ".join(
-            f"{r} ({roles[r][2]})" for r in missing) + ". Available columns: "
+        raise ValueError("Provide these column arguments: " + "; ".join(
+            f"{r}_column ({roles[r][2]})" for r in missing) + ". Available columns: "
             + ", ".join(c["name"] for c in columns))
     out = {}
     for role, name in mapping.items():
@@ -109,28 +114,55 @@ async def list_script_templates() -> dict:
         for k, t in TEMPLATES.items()}}
 
 
+# Column roles as flat, typed arguments (instead of a free-form object): every model and every
+# MCP client can express these, and each role is self-describing.
+_ROLE_ARGS = ("item", "date", "quantity", "value", "customer", "revenue", "order_id")
+
+
 @mcp.tool()
 async def generate_analysis_script(export_id: str, template: str,
-                                   columns: dict[str, str] | None = None,
-                                   params: dict | None = None) -> dict:
-    """Generate a ready-to-run Python script for an exported dataset, to present to the user as
-    an artifact (code file). The user runs it on their own machine (pandas + numpy); it
-    downloads the export, VERIFIES its checksum and row count, analyses it, writes CSVs to
-    ./output and fails loudly if its own self-checks do not reconcile.
+                                   item_column: str | None = None,
+                                   date_column: str | None = None,
+                                   quantity_column: str | None = None,
+                                   value_column: str | None = None,
+                                   customer_column: str | None = None,
+                                   revenue_column: str | None = None,
+                                   order_id_column: str | None = None,
+                                   params_json: str | None = None) -> dict:
+    """Generate a ready-to-run Python script for an exported dataset, to present to the user as a
+    copyable code file. The user runs it on their own machine (pandas + numpy); it downloads the
+    export, VERIFIES its checksum and row count, analyses it, writes CSVs to ./output and fails
+    loudly if its own self-checks do not reconcile.
 
     template: see list_script_templates (abc_xyz, rfm, cohort_retention, demand_forecast,
-    price_volume_mix, generic). columns maps each role to a column of the export, e.g.
-    {"item": "sku", "date": "sold_on", "quantity": "qty"}. For work no template covers, use
-    template='generic' and extend its analyze() function: the verified loading code is the
-    valuable part, so keep it. Explain the method and its limits when presenting the script."""
+    price_volume_mix, generic). Map the template's column roles to columns of the export with
+    the *_column arguments, e.g. item_column="sku", date_column="sold_on",
+    quantity_column="qty" (list_script_templates shows which roles each template needs).
+    params_json is an optional JSON object of template settings, e.g. '{"horizon": 6}'.
+    For work no template covers, use template='generic' and extend its analyze() function: the
+    verified loading code is the valuable part, so keep it. Explain the method and its limits
+    when presenting the script."""
     t = TEMPLATES.get(template)
     if not t:
         raise ValueError(f"Unknown template '{template}'. Choose from {sorted(TEMPLATES)}.")
+    given = {"item": item_column, "date": date_column, "quantity": quantity_column,
+             "value": value_column, "customer": customer_column, "revenue": revenue_column,
+             "order_id": order_id_column}
+    columns = {role: v for role, v in given.items() if v}
+    params: dict = {}
+    if params_json and params_json.strip():
+        try:
+            params = json.loads(params_json)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"params_json is not valid JSON: {e.msg}.")
+        if not isinstance(params, dict):
+            raise ValueError("params_json must be a JSON object, e.g. {\"horizon\": 6}.")
     e = await exports.get_owned_export(current_user_id.get(), export_id)
     if not e:
         raise ValueError("Export not found or expired. Run export_result first.")
-    cols = _resolve_columns(t, columns or {}, e.columns)
-    prm = _resolve_params(template, t, params or {})
+    await _load(e.source_id)            # the export's data source must be enabled for this app
+    cols = _resolve_columns(t, columns, e.columns)
+    prm = _resolve_params(template, t, params)
     m = exports.manifest(e)
     expected = {"filename": e.filename, "rows": e.rows, "sha256": e.sha256,
                 "columns": [{"name": c["name"], "type": c["type"]} for c in e.columns],
@@ -145,7 +177,7 @@ async def generate_analysis_script(export_id: str, template: str,
             "how_to_run": ["pip install pandas numpy", f"python {script_name}",
                            "Results are written to ./output/*.csv and summarised on screen."],
             "download_link_expires_at": m["download_link_expires_at"],
-            "note": ("Present this to the user as a code artifact. The script embeds a "
+            "note": ("Present this to the user as a copyable code file. The script embeds a "
                      "30-minute download link; if it expires they can download the file via a "
                      "fresh link from get_export_link and pass --file. Describe the method "
                      "and its limitations (see comments in the script).")}

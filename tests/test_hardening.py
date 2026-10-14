@@ -197,8 +197,8 @@ async def test_metrics_count_tool_calls_and_require_token(env, monkeypatch):
         assert (await c.get("/metrics", headers={"Authorization": "Bearer wrong"})).status_code == 401
         r = await c.get("/metrics", headers={"Authorization": "Bearer m-secret"})
         assert r.status_code == 200
-        assert 'connector_tool_calls_total{status="ok",tool="run_query"}' in r.text
-        assert 'connector_tool_calls_total{status="rejected",tool="run_query"}' in r.text
+        assert 'connector_tool_calls_total{provider="claude",status="ok",tool="run_query"}' in r.text
+        assert 'connector_tool_calls_total{provider="claude",status="rejected",tool="run_query"}' in r.text
         assert "connector_tool_seconds_bucket" in r.text and "connector_http_requests_total" in r.text
 
 
@@ -230,11 +230,13 @@ async def test_logs_are_json_and_never_contain_tokens_or_sql(env, caplog):
         await c.get("/files/SECRET.TOKEN.VALUE")
         await c.get("/oauth/authorize?client_id=x&redirect_uri=y&code_challenge=SECRETCHALLENGE")
     await data.run_query(env["src"], "SELECT 'sensitive-literal' AS x")
-    blob = " ".join(json.dumps(r.__dict__, default=str) for r in caplog.records)
+    # only the SERVER's own logger: the test's httpx client logs the URLs it requests
+    server = [r for r in caplog.records if r.name == "connector"]
+    blob = " ".join(json.dumps(r.__dict__, default=str) for r in server)
     assert "SECRET.TOKEN.VALUE" not in blob and "SECRETCHALLENGE" not in blob
     assert "sensitive-literal" not in blob                              # SQL stays in the audit table
     assert "/files/[redacted]" in blob
-    rec = next(r for r in caplog.records if getattr(r, "event", "") == "tool_call")
+    rec = next(r for r in server if getattr(r, "event", "") == "tool_call")
     request_id_var.set("rid-1")
     out = json.loads(JsonFormatter().format(rec))
     assert out["event"] == "tool_call" and out["tool"] == "run_query" and out["request_id"] == "rid-1"
@@ -285,3 +287,106 @@ async def test_maintenance_removes_only_what_it_should(env, monkeypatch):
             "revoked-live", "active"}
         assert {a.tool for a in (await s.execute(select(AuditLog))).scalars()} >= {"recent"}
         assert "old" not in {a.tool for a in (await s.execute(select(AuditLog))).scalars()}
+
+
+# ------------------------------------------------------------------ log redaction (all loggers)
+@pytest.mark.parametrize("raw,secret", [
+    ('INFO: 127.0.0.1:5 - "GET /files/eyJhbGciOi.abc-DEF_123 HTTP/1.1" 200', "eyJhbGciOi"),
+    ("GET /oauth/authorize?client_id=x&code=AUTHCODE123&state=S1 HTTP/1.1", "AUTHCODE123"),
+    ("GET /cb?code_challenge=CHAL999&code_verifier=VERIF888", "CHAL999"),
+    ("POST /x?refresh_token=RT777&access_token=AT666", "RT777"),
+    ("url=http://h/p?token=TOK555&other=1", "TOK555"),
+    ("password=hunter2hunter2&x=1", "hunter2hunter2"),
+    ("/files/aaa.bbb.ccc?download=1", "aaa.bbb.ccc"),
+])
+def test_scrub_removes_secrets_but_keeps_context(raw, secret):
+    from app.observability import scrub
+    out = scrub(raw)
+    assert secret not in out and "[redacted]" in out
+
+
+def test_scrub_leaves_harmless_text_alone():
+    from app.observability import scrub
+    for text in ("GET /login HTTP/1.1", "GET /sources?page=2", "files uploaded: 3",
+                 "GET /oauth/authorize?client_id=abc&redirect_uri=http://localhost/cb"):
+        assert scrub(text) == text
+    assert scrub("a code=1 b") == "a code=1 b"          # not a query parameter
+
+
+def test_scrub_keeps_parameter_names():
+    from app.observability import scrub
+    assert scrub("?client_id=x&code=SECRET&state=Z") == "?client_id=x&code=[redacted]&state=[redacted]"
+
+
+def test_redact_filter_scrubs_formatted_args_from_any_logger():
+    import io
+    from app.observability import RedactFilter
+    buf = io.StringIO()
+    h = logging.StreamHandler(buf)
+    h.addFilter(RedactFilter())
+    lg = logging.getLogger("third.party")
+    lg.addHandler(h)
+    lg.setLevel(logging.INFO)
+    lg.propagate = False
+    try:
+        lg.info('%s - "%s %s HTTP/%s" %d', "1.2.3.4", "GET", "/files/SECRETTOK?x=1", "1.1", 200)
+        lg.info("plain message")
+    finally:
+        lg.removeHandler(h)
+    out = buf.getvalue()
+    assert "SECRETTOK" not in out and "/files/[redacted]" in out and "plain message" in out
+
+
+def test_configure_logging_silences_uvicorn_access_log():
+    from app.observability import configure_logging
+    configure_logging()
+    assert logging.getLogger("uvicorn.access").disabled is True
+
+
+def test_real_server_with_default_uvicorn_flags_never_logs_secrets(tmp_path):
+    """End to end in a real process, deliberately WITHOUT --log-level/--no-access-log: uvicorn's
+    default access log would print the raw request line with the token / OAuth query."""
+    import os
+    import socket
+    import subprocess
+    import sys
+    import time
+    from pathlib import Path
+    with socket.socket() as sk:
+        sk.bind(("127.0.0.1", 0))
+        port = sk.getsockname()[1]
+    root = Path(__file__).resolve().parent.parent
+    env = {**os.environ,
+           "CONNECTOR_DATABASE_URL": f"sqlite+aiosqlite:///{(tmp_path / 'r.db').as_posix()}",
+           "CONNECTOR_DATA_DIR": str(tmp_path / "d"),
+           "CONNECTOR_PUBLIC_BASE_URL": f"http://127.0.0.1:{port}",
+           "CONNECTOR_BOOTSTRAP_ADMIN_EMAIL": "boot@x.in",
+           "CONNECTOR_BOOTSTRAP_ADMIN_PASSWORD": "Super-Secret-Boot-Pw-1",
+           "PYTHONPATH": str(root)}      # run from tmp_path so ./.env is never read
+    subprocess.run([sys.executable, "-m", "app.cli", "migrate"], cwd=tmp_path, env=env,
+                   check=True, capture_output=True, timeout=120)
+    log = tmp_path / "server.log"
+    with open(log, "w") as out:
+        proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--port",
+                                 str(port)], cwd=tmp_path, env=env, stdout=out,
+                                stderr=subprocess.STDOUT)
+        try:
+            base = f"http://127.0.0.1:{port}"
+            for _ in range(40):
+                try:
+                    if httpx.get(base + "/readyz", timeout=1).status_code == 200:
+                        break
+                except httpx.HTTPError:
+                    time.sleep(0.5)
+            httpx.get(base + "/files/SECRETTOKEN-abc123")
+            httpx.get(base + "/oauth/authorize?client_id=x&redirect_uri=y"
+                      "&code_challenge=SECRETCHALLENGE999")
+            httpx.post(base + "/login", data={"email": "boot@x.in",
+                                              "password": "Super-Secret-Boot-Pw-1"})
+        finally:
+            proc.terminate()
+            proc.wait(timeout=15)
+    text = log.read_text(errors="replace")
+    assert "Uvicorn running" in text or "Application startup complete" in text   # it did run
+    for secret in ("SECRETTOKEN", "SECRETCHALLENGE", "Super-Secret-Boot-Pw-1"):
+        assert secret not in text, f"{secret} leaked into the server log"

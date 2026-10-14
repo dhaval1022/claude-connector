@@ -9,7 +9,7 @@ from app.db.session import get_session
 from app.ui.routes import Ctx, _admin, _page
 
 router = APIRouter()
-STATUSES = ("ok", "rejected", "error")
+STATUSES = ("ok", "rejected", "error", "denied")
 
 
 @router.get("/admin/audit")

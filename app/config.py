@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     refresh_token_ttl_s: int = 60 * 60 * 24 * 30
     allowed_redirect_prefixes: list[str] = [
         "https://claude.ai/api/mcp/auth_callback",
+        # ChatGPT connectors. OpenAI's docs/guides show both a fixed callback and a per-app
+        # callback (/connector/oauth/<id>), so both are allowed; matching is structural.
+        "https://chatgpt.com/connector_platform_oauth_redirect",
+        "https://chatgpt.com/connector/oauth/",
         "http://localhost",
         "http://127.0.0.1",
         "http://[::1]",

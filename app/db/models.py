@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text
+from sqlalchemy import (JSON, Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text,
+                        text)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -43,6 +44,9 @@ class DataSource(Base):
     schema_cache: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     schema_cached_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     masked_columns: Mapped[list | None] = mapped_column(JSON, nullable=True)  # PII deny list
+    # Which AI providers may use this source (app/providers.py). New sources: Claude only.
+    allowed_providers: Mapped[list] = mapped_column(
+        JSON, default=lambda: ["claude"], server_default=text('\'["claude"]\''))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
@@ -51,6 +55,8 @@ class OAuthClient(Base):
     client_id: Mapped[str] = mapped_column(String(64), primary_key=True, default=_id)
     client_name: Mapped[str] = mapped_column(String(255), default="")
     redirect_uris: Mapped[list] = mapped_column(JSON)
+    # 'claude'/'openai' when every redirect is that provider's web host, else '' (user chooses)
+    provider_hint: Mapped[str] = mapped_column(String(20), default="", server_default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
@@ -61,6 +67,7 @@ class OAuthCode(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
     redirect_uri: Mapped[str] = mapped_column(Text)
     code_challenge: Mapped[str] = mapped_column(String(128))
+    provider: Mapped[str] = mapped_column(String(20), default="claude", server_default="claude")
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     used: Mapped[bool] = mapped_column(Boolean, default=False)
 
@@ -72,6 +79,7 @@ class RefreshToken(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+    provider: Mapped[str] = mapped_column(String(20), default="claude", server_default="claude")
 
 
 class AuditLog(Base):
@@ -81,6 +89,7 @@ class AuditLog(Base):
     user_id: Mapped[str | None] = mapped_column(String(32), index=True, nullable=True)
     source_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     tool: Mapped[str] = mapped_column(String(60))
+    provider: Mapped[str | None] = mapped_column(String(20), nullable=True)
     sql_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     row_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     elapsed_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -117,3 +126,20 @@ class Export(Base):
     sql_text: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class ApiToken(Base):
+    """Personal access token for MCP clients that send a static bearer token (OpenAI's
+    `authorization` field, Gemini CLI headers). Only the SHA-256 is stored; the secret is shown
+    once. Expiry is mandatory; disabling the owner disables the token."""
+    __tablename__ = "api_tokens"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(80))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    prefix: Mapped[str] = mapped_column(String(16))      # first chars, to recognise it in the UI
+    provider: Mapped[str] = mapped_column(String(20), default="other")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False)

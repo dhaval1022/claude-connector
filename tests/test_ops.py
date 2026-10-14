@@ -153,3 +153,40 @@ def test_rotate_key_cli(tmp_path):
     assert r.returncode == 0 and "Re-encrypted 0" in r.stdout
     assert cli(["rotate-key", old, old], db).returncode != 0
     assert cli(["rotate-key", "garbage", new], db).returncode != 0
+
+
+# ------------------------------------------------------------------ migration 0002 on real data
+def test_upgrade_backfills_existing_rows_claude_only_and_is_reversible(tmp_path):
+    from alembic import command
+
+    from app.db.migrate import _config
+    db = tmp_path / "old.db"
+    url = f"sqlite+aiosqlite:///{db}"
+    command.upgrade(_config(url), "0001")                        # the schema before providers
+    c = sqlite3.connect(db)
+    c.execute("INSERT INTO users (id,email,name,password_hash,role,is_active,must_change_password,"
+              "failed_logins,created_at) VALUES ('u1','a@x.in','A','h','analyst',1,0,0,'2026-01-01')")
+    c.execute("INSERT INTO data_sources (id,owner_id,name,engine,config_encrypted,status,created_at) "
+              "VALUES ('s1','u1','old source','postgres',x'00','ok','2026-01-01')")
+    c.execute("INSERT INTO oauth_clients (client_id,client_name,redirect_uris,created_at) "
+              "VALUES ('c1','x','[]','2026-01-01')")
+    c.execute("INSERT INTO refresh_tokens (token_hash,client_id,user_id,expires_at,revoked) "
+              "VALUES ('t1','c1','u1','2027-01-01',0)")
+    c.commit(); c.close()
+
+    command.upgrade(_config(url), "head")
+    c = sqlite3.connect(db)
+    import json
+    assert json.loads(c.execute("SELECT allowed_providers FROM data_sources").fetchone()[0]) == ["claude"]
+    assert c.execute("SELECT provider FROM refresh_tokens").fetchone()[0] == "claude"
+    assert c.execute("SELECT provider_hint FROM oauth_clients").fetchone()[0] == ""
+    assert {r[1] for r in c.execute("PRAGMA table_info(api_tokens)")} >= {
+        "token_hash", "owner_id", "expires_at", "revoked", "provider"}
+    c.close()
+
+    command.downgrade(_config(url), "0001")                      # and it can be rolled back
+    c = sqlite3.connect(db)
+    cols = {r[1] for r in c.execute("PRAGMA table_info(data_sources)")}
+    assert "allowed_providers" not in cols
+    assert c.execute("SELECT name FROM data_sources").fetchone()[0] == "old source"   # data intact
+    c.close()
