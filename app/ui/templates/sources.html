@@ -3,22 +3,14 @@
 <h2>My data sources</h2>
 {% if notice %}<p class="ok">{{ notice }}</p>{% endif %}
 {% if error %}<p class="err">{{ error }}</p>{% endif %}
+<p class="muted">Which AI apps can use your data sources is set once for your account on the
+  <a href="/account/connect">Connect</a> page.</p>
 
 {% for s in sources %}
 <div class="card">
   <strong>{{ s.name }}</strong> <span class="muted">· {{ s.engine }} · {{ s.status }}
     · schema cached {{ s.schema_cached_at.strftime("%Y-%m-%d %H:%M") if s.schema_cached_at else "never" }}
     · {% set n = namespace(t=0) %}{% for sch in (s.schema_cache.schemas.values() if s.schema_cache else []) %}{% set n.t = n.t + sch|length %}{% endfor %}{{ n.t }} tables</span>
-  <form method="post" action="/sources/{{ s.id }}/providers">
-    <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
-    <label class="muted">AI apps allowed to use this data source (query results are sent to the app's
-      provider; a new source is Claude-only):</label><br>
-    {% for key, label in providers.items() %}
-    <label style="margin-right:12px"><input type="checkbox" name="providers" value="{{ key }}"
-      style="width:auto" {{ "checked" if key in (s.allowed_providers or []) }}> {{ label }}</label>
-    {% endfor %}
-    <button>Save apps</button>
-  </form>
   <form method="post" action="/sources/{{ s.id }}/masked">
     <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
     <label class="muted">Masked columns (Claude cannot read these; comma-separated, e.g. phone,email)</label>

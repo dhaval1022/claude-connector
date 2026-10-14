@@ -1,5 +1,5 @@
-"""Per-source provider allow-list: EVERY tool that touches a data source (or an export of one) must
-refuse a provider the owner has not enabled, with no side effects, and audit the refusal."""
+"""Per-USER provider allow-list: EVERY tool that touches a data source (or an export of one) must
+refuse a provider the user has not enabled, with no side effects, and audit the refusal."""
 import re
 import sqlite3
 from datetime import date, timedelta
@@ -46,9 +46,9 @@ async def env(tmp_path):
     yield {"src": src.id, "eid": m["export_id"], "user": u.id, "other": o.id, "path": path}
 
 
-async def set_allowed(source_id, allowed):
+async def set_allowed(user_id, allowed):
     async with SessionLocal() as s:
-        (await s.get(DataSource, source_id)).allowed_providers = allowed
+        (await s.get(User, user_id)).allowed_providers = allowed
         await s.commit()
 
 
@@ -87,7 +87,7 @@ def test_the_matrix_covers_every_tool_that_takes_a_source_or_export_id():
 # ------------------------------------------------------------------ denial
 @pytest.mark.parametrize("tool", sorted(CALLS))
 async def test_provider_not_on_allow_list_is_refused(env, tool):
-    await set_allowed(env["src"], ["claude"])
+    await set_allowed(env["user"], ["claude"])
     current_provider.set("openai")
     with pytest.raises(ValueError, match=DENIED) as e:
         await CALLS[tool](env["src"], env["eid"])
@@ -101,7 +101,7 @@ async def test_provider_not_on_allow_list_is_refused(env, tool):
 @pytest.mark.parametrize("provider", PROVIDERS)
 async def test_only_the_enabled_provider_gets_in(env, provider):
     """Not hard-coded to Claude: enabling a single provider lets exactly that one in."""
-    await set_allowed(env["src"], [provider])
+    await set_allowed(env["user"], [provider])
     for caller in PROVIDERS:
         current_provider.set(caller)
         if caller == provider:
@@ -112,7 +112,7 @@ async def test_only_the_enabled_provider_gets_in(env, provider):
 
 
 async def test_empty_allow_list_means_nobody_not_everybody(env):
-    await set_allowed(env["src"], [])
+    await set_allowed(env["user"], [])
     for caller in PROVIDERS:
         current_provider.set(caller)
         with pytest.raises(ValueError, match=DENIED):
@@ -121,7 +121,7 @@ async def test_empty_allow_list_means_nobody_not_everybody(env):
 
 
 async def test_denied_write_tools_leave_no_side_effects(env):
-    await set_allowed(env["src"], ["claude"])
+    await set_allowed(env["user"], ["claude"])
     current_provider.set("gemini")
     before = (await _export_count(), await _semantic_count(), await _cached_at(env["src"]))
     for tool in ("save_business_context", "delete_business_context", "export_result",
@@ -149,41 +149,37 @@ async def _cached_at(source_id):
 # ------------------------------------------------------------------ opt-in works for every tool
 @pytest.mark.parametrize("tool", sorted(CALLS))
 async def test_every_tool_works_once_the_owner_opts_in(env, tool):
-    await set_allowed(env["src"], ["claude", "openai"])
+    await set_allowed(env["user"], ["claude", "openai"])
     current_provider.set("openai")
     result = await CALLS[tool](env["src"], env["eid"])
     assert result                                    # ran to completion, no refusal
 
 
 # ------------------------------------------------------------------ listing
-async def test_list_data_sources_filters_and_reports_hidden_count(env, tmp_path):
+async def test_list_data_sources_hides_everything_from_an_app_the_user_did_not_enable(env, tmp_path):
     db2 = tmp_path / "second.db"
     c = sqlite3.connect(db2); c.execute("CREATE TABLE z(a)"); c.commit(); c.close()
     async with SessionLocal() as s:
-        second = await service.create_source(s, env["user"], "second", "sqlite", {"database": str(db2)})
-    await set_allowed(second.id, ["claude", "openai"])
-    await set_allowed(env["src"], ["claude"])
+        await service.create_source(s, env["user"], "second", "sqlite", {"database": str(db2)})
+    await set_allowed(env["user"], ["claude", "openai"])
 
-    current_provider.set("claude")
-    out = await list_data_sources()
-    assert {x["name"] for x in out["data_sources"]} == {"main", "second"} and "note" not in out
-    current_provider.set("openai")
-    out = await list_data_sources()
-    assert [x["name"] for x in out["data_sources"]] == ["second"]
-    assert out["not_enabled_for_this_app"] == 1 and "ChatGPT / OpenAI" in out["note"]
-    assert "http://test/sources" in out["note"]
+    for provider in ("claude", "openai"):
+        current_provider.set(provider)
+        out = await list_data_sources()
+        assert {x["name"] for x in out["data_sources"]} == {"main", "second"} and "note" not in out
     current_provider.set("gemini")
     out = await list_data_sources()
     assert out["data_sources"] == [] and out["not_enabled_for_this_app"] == 2
+    assert "Gemini (Google)" in out["note"] and "http://test/account/connect" in out["note"]
 
 
-async def test_list_exports_only_shows_exports_of_enabled_sources(env):
-    await set_allowed(env["src"], ["claude"])
+async def test_list_exports_only_shows_exports_when_the_app_is_enabled(env):
+    await set_allowed(env["user"], ["claude"])
     current_provider.set("claude")
     assert len((await exports.list_exports())["exports"]) == 1
     current_provider.set("openai")
     assert (await exports.list_exports())["exports"] == []
-    await set_allowed(env["src"], ["claude", "openai"])
+    await set_allowed(env["user"], ["claude", "openai"])
     assert len((await exports.list_exports())["exports"]) == 1
 
 
@@ -198,21 +194,9 @@ async def test_non_owner_still_sees_not_found_not_a_provider_message(env):
         await exports.get_export_link(env["eid"])
 
 
-async def test_new_sources_default_to_claude_only(env, tmp_path):
+async def test_new_users_default_to_claude_only(env):
     async with SessionLocal() as s:
-        sqlite_src = await s.get(DataSource, env["src"])
-        assert sqlite_src.allowed_providers == ["claude"]
-
-        class Up:
-            def __init__(self, b):
-                import io
-                self._b = io.BytesIO(b)
-
-            async def read(self, n=-1):
-                return self._b.read(n)
-
-        files = await service.create_file_source(s, env["user"], "files", [("a.csv", Up(b"a\n1\n"))])
-        assert files.allowed_providers == ["claude"]
+        assert (await s.get(User, env["user"])).allowed_providers == ["claude"]
 
 
 # ------------------------------------------------------------------ the web UI that edits it
@@ -229,47 +213,46 @@ async def login(email):
 async def test_ui_shows_and_saves_the_allow_list_with_an_audit_trail(env):
     c = await login("e@x.in")
     try:
-        page = (await c.get("/sources")).text
+        page = (await c.get("/account/connect")).text
         assert 'name="providers" value="claude"' in page
         assert re.search(r'value="claude"\s+style="width:auto"\s+checked', page)
         assert not re.search(r'value="openai"\s+style="width:auto"\s+checked', page)
         csrf = csrf_of(page)
-        r = await c.post(f"/sources/{env['src']}/providers",
+        r = await c.post("/account/providers",
                          data={"providers": ["claude", "openai", "evil", "claude"], "csrf": csrf})
         assert r.status_code == 200 and "ChatGPT / OpenAI" in r.text
         assert "sent to ChatGPT / OpenAI" in r.text              # the privacy consequence is spelled out
         async with SessionLocal() as s:
-            assert (await s.get(DataSource, env["src"])).allowed_providers == ["claude", "openai"]
+            assert (await s.get(User, env["user"])).allowed_providers == ["claude", "openai"]
             log = (await s.execute(select(AuditLog).where(AuditLog.tool == "ui:set_providers"))).scalars().all()
         assert len(log) == 1 and "['claude'] -> ['claude', 'openai']" in log[0].sql_text
-        # nothing ticked = nobody may use it
-        r = await c.post(f"/sources/{env['src']}/providers", data={"csrf": csrf})
+        # nothing ticked = no app may use them
+        r = await c.post("/account/providers", data={"csrf": csrf})
         assert "no app" in r.text
         async with SessionLocal() as s:
-            assert (await s.get(DataSource, env["src"])).allowed_providers == []
+            assert (await s.get(User, env["user"])).allowed_providers == []
     finally:
         await c.aclose()
 
 
-async def test_ui_allow_list_edit_is_owner_only_and_csrf_protected(env):
+async def test_ui_allow_list_edit_is_csrf_protected_and_only_changes_your_own_account(env):
     ce, co = await login("e@x.in"), await login("o@x.in")
     try:
-        ocsrf = csrf_of((await co.get("/sources")).text)
-        r = await co.post(f"/sources/{env['src']}/providers", data={"providers": ["openai"], "csrf": ocsrf})
-        assert r.status_code == 404                              # someone else's source
-        ecsrf = csrf_of((await ce.get("/sources")).text)
-        r = await ce.post(f"/sources/{env['src']}/providers", data={"providers": ["openai"], "csrf": "forged"})
+        ocsrf = csrf_of((await co.get("/account/connect")).text)
+        r = await co.post("/account/providers", data={"providers": ["openai"], "csrf": ocsrf})
+        assert r.status_code == 200
+        r = await ce.post("/account/providers", data={"providers": ["openai"], "csrf": "forged"})
         assert r.status_code == 403
         async with SessionLocal() as s:
-            assert (await s.get(DataSource, env["src"])).allowed_providers == ["claude"]   # unchanged
-        assert ecsrf
+            assert (await s.get(User, env["user"])).allowed_providers == ["claude"]    # unchanged
+            assert (await s.get(User, env["other"])).allowed_providers == ["openai"]   # only theirs
     finally:
         await ce.aclose()
         await co.aclose()
 
 
 async def test_audit_page_shows_the_app_column_and_denied_filter(env):
-    await set_allowed(env["src"], ["claude"])
+    await set_allowed(env["user"], ["claude"])
     current_provider.set("gemini")
     with pytest.raises(ValueError):
         await data.run_query(env["src"], "SELECT 1")

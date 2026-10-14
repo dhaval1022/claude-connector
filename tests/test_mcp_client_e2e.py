@@ -40,8 +40,8 @@ async def main():
                  must_change_password=False)
         s.add(u); await s.commit()
         a = await service.create_source(s, u.id, "open_src", "sqlite", {"database": db_file})
-        b = await service.create_source(s, u.id, "claude_only", "sqlite", {"database": db_file})
-        a.allowed_providers = ["claude", "openai"]
+        b = await service.create_source(s, u.id, "second_src", "sqlite", {"database": db_file})
+        u.allowed_providers = ["claude", "openai"]            # per user: Gemini stays off
         await s.commit()
         out = {"open": a.id, "closed": b.id}
         for name, prov in (("openai", "openai"), ("claude", "claude"), ("gemini", "gemini")):
@@ -136,19 +136,19 @@ async def test_a_real_mcp_client_lists_lean_tools_with_annotations_using_an_open
     assert by["delete_business_context"].annotations.destructiveHint is True
 
 
-async def test_openai_token_sees_only_sources_enabled_for_openai(server):
+async def test_openai_token_sees_all_sources_when_the_user_enabled_openai(server):
     async def body(s):
         return payload(await s.call_tool("list_data_sources", {}))
     out = await run_with(server, server["ids"]["openai"], body)
-    assert [x["name"] for x in out["data_sources"]] == ["open_src"]
-    assert out["not_enabled_for_this_app"] == 1 and "ChatGPT / OpenAI" in out["note"]
+    assert {x["name"] for x in out["data_sources"]} == {"open_src", "second_src"}
+    assert "not_enabled_for_this_app" not in out
 
 
 async def test_claude_token_sees_everything_gemini_sees_nothing(server):
     async def body(s):
         return payload(await s.call_tool("list_data_sources", {}))
     both = await run_with(server, server["ids"]["claude"], body)
-    assert {x["name"] for x in both["data_sources"]} == {"open_src", "claude_only"}
+    assert {x["name"] for x in both["data_sources"]} == {"open_src", "second_src"}
     none = await run_with(server, server["ids"]["gemini"], body)
     assert none["data_sources"] == [] and none["not_enabled_for_this_app"] == 2
 
@@ -165,13 +165,13 @@ async def test_queries_work_on_an_enabled_source_with_exact_results(server):
     assert [c["name"] for c in d["columns"]] == ["id", "v"] and len(d["sample"]["rows"]) == 2
 
 
-async def test_a_source_not_enabled_for_the_app_is_refused_over_the_wire(server):
+async def test_an_app_the_user_did_not_enable_is_refused_over_the_wire(server):
     async def body(s):
         return await s.call_tool("run_query", {
             "source_id": server["ids"]["closed"], "sql": "SELECT COUNT(*) FROM t"})
-    result = await run_with(server, server["ids"]["openai"], body)
+    result = await run_with(server, server["ids"]["gemini"], body)
     assert result.isError is True
-    assert "not enabled for ChatGPT / OpenAI" in result.content[0].text
+    assert "not enabled for Gemini (Google)" in result.content[0].text
     assert "SELECT" not in result.content[0].text and str(ROWS) not in result.content[0].text
 
 

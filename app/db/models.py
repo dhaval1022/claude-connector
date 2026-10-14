@@ -31,6 +31,9 @@ class User(Base):
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Which AI apps may use this user's data sources (app/providers.py). New users: Claude only.
+    allowed_providers: Mapped[list] = mapped_column(
+        JSON, default=lambda: ["claude"], server_default=text('\'["claude"]\''))
 
 
 class DataSource(Base):
@@ -44,9 +47,6 @@ class DataSource(Base):
     schema_cache: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     schema_cached_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     masked_columns: Mapped[list | None] = mapped_column(JSON, nullable=True)  # PII deny list
-    # Which AI providers may use this source (app/providers.py). New sources: Claude only.
-    allowed_providers: Mapped[list] = mapped_column(
-        JSON, default=lambda: ["claude"], server_default=text('\'["claude"]\''))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 

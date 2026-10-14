@@ -7,8 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.logger import audit
 from app.auth import api_tokens
 from app.config import get_settings
+from app.db.models import User
 from app.db.session import get_session
-from app.providers import LABELS, PROVIDERS
+from app.providers import LABELS, PROVIDERS, clean_allowed
 from app.ui.routes import Ctx, _check_csrf, _page, _require
 
 router = APIRouter()
@@ -36,13 +37,38 @@ async def _page_tokens(request, ctx, db, error="", created=None):
                  max_active=api_tokens.MAX_ACTIVE)
 
 
-@router.get("/account/connect")
-async def connect_info(request: Request, ctx: Ctx = Depends(_require)):
-    """Values to paste into an AI app's custom-connector form (no secrets here)."""
+def _connect_page(request, ctx, notice=""):
+    """Values to paste into an AI app's custom-connector form (no secrets here), plus the
+    account-level choice of which AI apps may use this user's data sources."""
     s = get_settings()
     base = s.public_base_url.rstrip("/")
     return _page(request, "connect.html", ctx, mcp_url=base + "/mcp", base=base,
-                 gemini_client_id=s.gemini_client_id)
+                 gemini_client_id=s.gemini_client_id, providers=LABELS, notice=notice,
+                 enabled=list(ctx.user.allowed_providers or []))
+
+
+@router.get("/account/connect")
+async def connect_info(request: Request, ctx: Ctx = Depends(_require)):
+    return _connect_page(request, ctx)
+
+
+@router.post("/account/providers")
+async def set_providers(request: Request, csrf: str = Form(),
+                        providers: list[str] = Form(default=[]), ctx: Ctx = Depends(_require),
+                        db: AsyncSession = Depends(get_session)):
+    _check_csrf(ctx, csrf)
+    old, new = list(ctx.user.allowed_providers or []), clean_allowed(providers)
+    user = await db.get(User, ctx.user.id)
+    user.allowed_providers = new
+    await db.commit()
+    ctx.user.allowed_providers = new
+    await audit(user_id=ctx.user.id, tool="ui:set_providers", status="ok",
+                sql=f"allowed_providers: {old} -> {new}")
+    msg = f"Your data sources are now usable from: {', '.join(LABELS[p] for p in new) or 'no app'}."
+    extra = [LABELS[p] for p in new if p != "claude"]
+    if extra:
+        msg += " Query results will be sent to " + ", ".join(extra) + "."
+    return _connect_page(request, ctx, notice=msg)
 
 
 @router.get("/account/tokens")

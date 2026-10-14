@@ -177,7 +177,8 @@ def test_upgrade_backfills_existing_rows_claude_only_and_is_reversible(tmp_path)
     command.upgrade(_config(url), "head")
     c = sqlite3.connect(db)
     import json
-    assert json.loads(c.execute("SELECT allowed_providers FROM data_sources").fetchone()[0]) == ["claude"]
+    assert json.loads(c.execute("SELECT allowed_providers FROM users").fetchone()[0]) == ["claude"]
+    assert "allowed_providers" not in {r[1] for r in c.execute("PRAGMA table_info(data_sources)")}
     assert c.execute("SELECT provider FROM refresh_tokens").fetchone()[0] == "claude"
     assert c.execute("SELECT provider_hint FROM oauth_clients").fetchone()[0] == ""
     assert {r[1] for r in c.execute("PRAGMA table_info(api_tokens)")} >= {
@@ -187,6 +188,33 @@ def test_upgrade_backfills_existing_rows_claude_only_and_is_reversible(tmp_path)
     command.downgrade(_config(url), "0001")                      # and it can be rolled back
     c = sqlite3.connect(db)
     cols = {r[1] for r in c.execute("PRAGMA table_info(data_sources)")}
-    assert "allowed_providers" not in cols
+    assert "allowed_providers" not in cols and "allowed_providers" not in {
+        r[1] for r in c.execute("PRAGMA table_info(users)")}
     assert c.execute("SELECT name FROM data_sources").fetchone()[0] == "old source"   # data intact
+    c.close()
+
+
+# ------------------------------------------------------------------ migration 0003 on real data
+def test_0003_gives_each_user_the_union_of_apps_enabled_on_their_sources(tmp_path):
+    import json
+
+    from alembic import command
+
+    from app.db.migrate import _config
+    db = tmp_path / "mid.db"
+    url = f"sqlite+aiosqlite:///{db}"
+    command.upgrade(_config(url), "0002")
+    c = sqlite3.connect(db)
+    for uid in ("u1", "u2"):
+        c.execute("INSERT INTO users (id,email,name,password_hash,role,is_active,must_change_password,"
+                  f"failed_logins,created_at) VALUES ('{uid}','{uid}@x.in','A','h','analyst',1,0,0,'2026-01-01')")
+    for sid, owner, allowed in (("s1", "u1", '["claude","openai"]'), ("s2", "u1", '["gemini"]'),
+                                ("s3", "u2", '["claude"]')):
+        c.execute("INSERT INTO data_sources (id,owner_id,name,engine,config_encrypted,status,created_at,"
+                  f"allowed_providers) VALUES ('{sid}','{owner}','n','postgres',x'00','ok','2026-01-01','{allowed}')")
+    c.commit(); c.close()
+    command.upgrade(_config(url), "head")
+    c = sqlite3.connect(db)
+    got = {r[0]: json.loads(r[1]) for r in c.execute("SELECT id, allowed_providers FROM users")}
+    assert got == {"u1": ["claude", "openai", "gemini"], "u2": ["claude"]}
     c.close()

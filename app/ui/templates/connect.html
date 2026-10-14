@@ -3,6 +3,21 @@
 <h2>Connect an app</h2>
 <p class="muted">Claude and ChatGPT register themselves, so they only need the server URL. Gemini's
   custom connector form asks for the values below. You then sign in with your own account here.</p>
+{% if notice %}<p class="ok">{{ notice }}</p>{% endif %}
+
+<div class="card">
+  <h3>Which AI apps can use my data sources?</h3>
+  <form method="post" action="/account/providers">
+    <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
+    <p class="muted">Applies to all your data sources. Query results are sent to the app's provider.
+      New accounts are Claude-only.</p>
+    {% for key, label in providers.items() %}
+    <label style="margin-right:12px"><input type="checkbox" name="providers" value="{{ key }}"
+      style="width:auto" {{ "checked" if key in enabled }}> {{ label }}</label>
+    {% endfor %}
+    <br><button>Save apps</button>
+  </form>
+</div>
 
 <div class="card">
   <h3>Gemini (Google)</h3>

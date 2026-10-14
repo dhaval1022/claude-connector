@@ -4,13 +4,12 @@ from sqlalchemy import select
 from app import breaker
 from app.audit.logger import audit
 from app.config import get_settings
-from app.db.models import DataSource, Export
+from app.db.models import Export
 from app.db.session import SessionLocal
 from app.exports import service as exports
 from app.guard.sql_validator import QueryRejected
 from app.mcp_tools.data import _load, validated_query
-from app.mcp_tools.server import current_provider, current_user_id, mcp
-from app.providers import is_allowed
+from app.mcp_tools.server import app_enabled_for_user, current_user_id, mcp
 from app.ratelimit import enforce
 from app.sources.service import clean_error, connector_for
 
@@ -68,13 +67,11 @@ async def get_export_link(export_id: str) -> dict:
 @mcp.tool()
 async def list_exports(limit: int = 20) -> dict:
     """List your recent, still-available exports (newest first), without download links."""
+    if not await app_enabled_for_user():      # the user has not enabled THIS app
+        return {"exports": []}
     async with SessionLocal() as db:
         rows = (await db.execute(select(Export).where(Export.owner_id == current_user_id.get())
                                  .order_by(Export.created_at.desc())
                                  .limit(min(max(limit, 1), 100)))).scalars().all()
-    async with SessionLocal() as db:   # only exports of sources enabled for THIS app
-        mine = (await db.execute(select(DataSource).where(
-            DataSource.owner_id == current_user_id.get()))).scalars().all()
-    ok = {s.id for s in mine if is_allowed(s.allowed_providers, current_provider.get())}
     return {"exports": [exports.manifest(e, with_link=False) for e in rows
-                        if e.expires_at is not None and e.source_id in ok]}
+                        if e.expires_at is not None]}
