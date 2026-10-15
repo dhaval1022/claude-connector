@@ -39,6 +39,7 @@ async def save_business_context(source_id: str, kind: str, name: str, descriptio
     """Save (or update by kind+name) a piece of business context. Only save things the USER
     stated or confirmed; do not invent definitions.
 
+    kind=database_note name='database' (or source name), description of domain/coverage
     kind=metric        name='net_sales', description in words, sql_expression='SUM(gross)-SUM(returns)'
     kind=glossary      name='MRP', description='Maximum retail price'
     kind=table_note    name='orders' (a real table), description of what it holds / grain
@@ -49,6 +50,8 @@ async def save_business_context(source_id: str, kind: str, name: str, descriptio
     if kind not in sem.KINDS:
         raise ValueError(f"kind must be one of {sem.KINDS}")
     name, description = name.strip(), description.strip()
+    if kind == "database_note" and not name:
+        name = "database"
     if not name or len(name) > sem.MAX_NAME:
         raise ValueError(f"name is required (max {sem.MAX_NAME} characters).")
     if not description or len(description) > sem.MAX_DESC:

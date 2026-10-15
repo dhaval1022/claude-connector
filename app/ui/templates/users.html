@@ -1,38 +1,130 @@
 {% extends "base.html" %}
+{% block title %}User Management – Medkart Data Connector{% endblock %}
 {% block body %}
-<h2>Users</h2>
-{% if notice %}<p class="ok">{{ notice }}</p>{% endif %}
-{% if error %}<p class="err">{{ error }}</p>{% endif %}
-
-<div class="card">
-  <h3>Create user</h3>
-  <form method="post" action="/admin/users">
-    <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
-    <input name="email" type="email" placeholder="Email" required>
-    <input name="name" placeholder="Full name" required>
-    <select name="role">{% for r in roles %}<option>{{ r }}</option>{% endfor %}</select>
-    <button>Create</button>
-  </form>
-  <p class="muted">A temporary password is generated; the user must change it on first login.</p>
+<div style="margin-bottom:24px">
+  <h2>User Administration</h2>
+  <p class="muted">Manage user roles, account activation, and assign user-level AI assistant permissions.</p>
 </div>
 
-<table>
-  <tr><th>Email</th><th>Name</th><th>Role</th><th>Status</th><th>Last login</th><th></th></tr>
-  {% for u in users %}
-  <tr>
-    <td>{{ u.email }}</td><td>{{ u.name }}</td><td>{{ u.role }}</td>
-    <td>{{ "active" if u.is_active else "disabled" }}</td>
-    <td>{{ u.last_login.strftime("%Y-%m-%d %H:%M") if u.last_login else "never" }}</td>
-    <td>
-      <form class="inline" method="post" action="/admin/users/{{ u.id }}/toggle">
-        <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
-        <button>{{ "Disable" if u.is_active else "Enable" }}</button></form>
-      <form class="inline" method="post" action="/admin/users/{{ u.id }}/reset"
-            onsubmit="return confirm('Reset password for {{ u.email }}?')">
-        <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
-        <button>Reset password</button></form>
-    </td>
-  </tr>
-  {% endfor %}
-</table>
+{% if notice %}<div class="ok">{{ notice }}</div>{% endif %}
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+
+<div class="card" style="border-left:4px solid var(--primary)">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+    <div style="width:28px;height:28px;border-radius:6px;background:#ecfdf5;display:flex;align-items:center;justify-content:center;font-size:15px">👤</div>
+    <div>
+      <h3 style="margin:0">Create user</h3>
+      <span class="muted" style="font-size:12px">A temporary password will be generated for the account.</span>
+    </div>
+  </div>
+
+  <form method="post" action="/admin/users" style="margin-top:14px">
+    <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
+    <div style="display:grid;grid-template-columns:2fr 2fr 1fr auto;gap:10px;align-items:end">
+      <div>
+        <label style="font-size:12px;font-weight:600;color:#475569">Email Address</label>
+        <input name="email" type="email" placeholder="user@medkart.in" required style="margin:4px 0 0">
+      </div>
+      <div>
+        <label style="font-size:12px;font-weight:600;color:#475569">Full Name</label>
+        <input name="name" placeholder="Full name" required style="margin:4px 0 0">
+      </div>
+      <div>
+        <label style="font-size:12px;font-weight:600;color:#475569">Role</label>
+        <select name="role" style="margin:4px 0 0">
+          {% for r in roles %}<option>{{ r }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <button style="padding:10px 18px">Create</button>
+      </div>
+    </div>
+
+    <div style="margin-top:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:var(--radius-sm);padding:10px 12px">
+      <label style="font-size:12px;font-weight:600;color:#475569;display:block;margin-bottom:6px">User-Level Permitted AI Apps</label>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        {% for key, label in providers.items() %}
+        <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+          <input type="checkbox" name="providers" value="{{ key }}" style="width:auto;margin:0" {{ "checked" if key == 'claude' }}>
+          <span>{{ label }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h3 style="margin-bottom:12px">All Users</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>User</th>
+        <th>Role</th>
+        <th>Permitted AI Apps</th>
+        <th>Status</th>
+        <th>Last Login</th>
+        <th style="text-align:right">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td>
+          <strong>{{ u.name }}</strong><br>
+          <span class="muted" style="font-size:12px">{{ u.email }}</span>
+        </td>
+        <td>
+          <span class="badge {% if u.role == 'admin' %}badge-purple{% else %}badge-blue{% endif %}">{{ u.role }}</span>
+        </td>
+        <td>
+          <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px">
+            {% for p in (u.allowed_providers or []) %}
+            <span class="badge badge-blue" style="font-size:11px">{{ providers.get(p, p) }}</span>
+            {% else %}
+            <span class="badge badge-amber" style="font-size:11px">None</span>
+            {% endfor %}
+          </div>
+          <details style="margin-top:4px">
+            <summary style="cursor:pointer;font-size:11px;color:var(--primary);font-weight:600">Edit Permissions</summary>
+            <form method="post" action="/admin/users/{{ u.id }}/providers" style="margin-top:8px;background:#f8fafc;padding:10px;border:1px solid #e2e8f0;border-radius:var(--radius-sm)">
+              <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
+              <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px">
+                {% for key, label in providers.items() %}
+                <label style="font-size:12px;display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+                  <input type="checkbox" name="providers" value="{{ key }}" style="width:auto;margin:0" {{ "checked" if key in (u.allowed_providers or []) }}>
+                  <span>{{ label }}</span>
+                </label>
+                {% endfor %}
+              </div>
+              <button class="btn-secondary" style="padding:4px 10px;font-size:11px;width:100%">Save AI apps</button>
+            </form>
+          </details>
+        </td>
+        <td>
+          <span class="badge {% if u.is_active %}badge-green{% else %}badge-amber{% endif %}">
+            <span class="user-dot" style="background:{% if u.is_active %}#10b981{% else %}#f59e0b{% endif %}"></span>
+            {{ "active" if u.is_active else "disabled" }}
+          </span>
+        </td>
+        <td class="muted">{{ u.last_login.strftime("%Y-%m-%d %H:%M") if u.last_login else "never" }}</td>
+        <td style="text-align:right">
+          <form class="inline" method="post" action="/admin/users/{{ u.id }}/toggle">
+            <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
+            <button class="btn-secondary" style="padding:4px 10px;font-size:12px">{{ "Disable" if u.is_active else "Enable" }}</button>
+          </form>
+          <form class="inline" method="post" action="/admin/users/{{ u.id }}/reset" onsubmit="return confirm('Reset password for {{ u.email }}?')">
+            <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
+            <button class="btn-secondary" style="padding:4px 10px;font-size:12px">Reset password</button>
+          </form>
+          <form class="inline" method="post" action="/admin/users/{{ u.id }}/delete" onsubmit="return confirm('Delete user {{ u.email }}?')">
+            <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
+            <button class="btn-secondary" style="padding:4px 10px;font-size:12px;color:var(--danger)">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% endblock %}

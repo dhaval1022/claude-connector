@@ -24,9 +24,9 @@ async def _create_admin(email: str, name: str, password: str) -> None:
         if (await s.execute(select(User).where(User.email == email.lower()))).scalar_one_or_none():
             sys.exit(f"User {email} already exists")
         s.add(User(email=email.lower(), name=name, role="admin",
-                   password_hash=hash_password(password), must_change_password=True))
+                   password_hash=hash_password(password)))
         await s.commit()
-    print(f"Admin {email} created (must change password on first login).")
+    print(f"Admin {email} created.")
 
 
 def main(argv: list[str]) -> None:

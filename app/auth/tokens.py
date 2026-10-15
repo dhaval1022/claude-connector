@@ -32,7 +32,7 @@ def issue_access_token(user_id: str, client_id: str, provider: str = "claude") -
     s = get_settings()
     now = int(time.time())
     return jwt.encode(
-        {"sub": user_id, "cid": client_id, "prv": provider, "iat": now,
+        {"sub": str(user_id), "cid": client_id, "prv": provider, "iat": now,
          "exp": now + s.access_token_ttl_s, "aud": _audience()},
         s.jwt_secret, algorithm="HS256",
     )

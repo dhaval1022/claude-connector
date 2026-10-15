@@ -8,17 +8,22 @@ from sqlalchemy import text
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app import maintenance
-from app.bootstrap import ensure_bootstrap_admin
 from app.auth.mcp_auth import McpAuthMiddleware
 from app.auth.oauth_server import router as oauth_router
+from app.bootstrap import ensure_bootstrap_admin
 from app.config import get_settings
+from app.db.migrate import auto_upgrade
 from app.db.session import engine
 from app.exports.routes import router as exports_router
 from app.mcp_tools import analysis, data, exports, scripts, semantic  # noqa: F401
 from app.mcp_tools.schema_compat import apply_lean_schemas
 from app.mcp_tools.server import mcp
-from app.observability import (RequestContextMiddleware, allowed_hosts, configure_logging,
-                               metrics_body)
+from app.observability import (
+    RequestContextMiddleware,
+    allowed_hosts,
+    configure_logging,
+    metrics_body,
+)
 from app.ui.audit_routes import router as audit_router
 from app.ui.routes import router as ui_router
 from app.ui.sources_routes import router as sources_router
@@ -36,6 +41,7 @@ async def lifespan(_: FastAPI):
         raise RuntimeError("CONNECTOR_JWT_SECRET must be set to a random string of 32+ chars")
     if not s.master_key:
         raise RuntimeError("CONNECTOR_MASTER_KEY is not set (python -m app.cli gen-key)")
+    await auto_upgrade()
     await ensure_bootstrap_admin()
     task = asyncio.create_task(maintenance.loop())
     try:

@@ -40,8 +40,7 @@ async def ensure_bootstrap_admin() -> bool:
             if (await db.execute(select(func.count()).select_from(User))).scalar_one() > 0:
                 return False
             db.add(User(email=email, name=s.bootstrap_admin_name.strip() or "Administrator",
-                        role="admin", password_hash=hash_password(password),
-                        must_change_password=True))
+                        role="admin", password_hash=hash_password(password)))
             await db.commit()
     except (OperationalError, ProgrammingError) as e:
         raise RuntimeError("The database is not initialised. Run the pre-deploy step first: "

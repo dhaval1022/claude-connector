@@ -1,5 +1,12 @@
 from argon2 import PasswordHasher
-from argon2.exceptions import InvalidHashError, VerifyMismatchError
+try:
+    from argon2.exceptions import InvalidHashError, VerifyMismatchError
+except ImportError:
+    try:
+        from argon2.exceptions import InvalidHash as InvalidHashError, VerifyMismatchError
+    except ImportError:
+        class VerifyMismatchError(Exception): pass
+        class InvalidHashError(Exception): pass
 
 _ph = PasswordHasher()
 

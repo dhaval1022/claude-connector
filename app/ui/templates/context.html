@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}{{ source.name }} – Context & Notes{% endblock %}
+{% block body %}
+<div style="margin-bottom:16px">
+  <a href="/sources" class="muted" style="text-decoration:none;font-size:13px;display:inline-flex;align-items:center;gap:4px">
+    <span>←</span> Back to Data sources
+  </a>
+</div>
+
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;flex-wrap:wrap;gap:12px">
+  <div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+      <h2 style="margin:0;font-size:24px">{{ source.name }}</h2>
+      <span class="badge {% if source.engine == 'files' %}badge-purple{% elif source.engine == 'postgres' %}badge-blue{% else %}badge-green{% endif %}">{{ source.engine }}</span>
+      <span class="badge {% if source.status == 'ready' %}badge-green{% else %}badge-amber{% endif %}">{{ source.status }}</span>
+    </div>
+    <p class="muted" style="margin:0;font-size:13px">
+      Context saved here is fed to <strong>Claude</strong>, <strong>ChatGPT</strong>, and <strong>Gemini</strong> during schema discovery (<code>list_data_sources</code>, <code>get_schema_overview</code>, <code>describe_table</code>) to ensure accurate queries and correct business logic.
+    </p>
+  </div>
+</div>
+
+{% if notice %}<div class="ok">{{ notice }}</div>{% endif %}
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+
+<!-- Card 1: Database-Level Overview Context -->
+<div class="card" style="border-left:4px solid var(--primary)">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+    <div style="width:28px;height:28px;border-radius:6px;background:#ecfdf5;display:flex;align-items:center;justify-content:center;color:#059669;font-weight:700">🏢</div>
+    <div>
+      <h3 style="margin:0">Database Overview Context</h3>
+      <span class="muted" style="font-size:12px">Global business domain, date coverage, standing filters, and ERP background</span>
+    </div>
+  </div>
+  <p class="muted">
+    Describe what this database represents and any global standing rules (e.g. <em>"Medkart retail pharmacy ERP: store sales, medicine inventory, customer orders, and vendor invoices from 2021 to present. Currency is INR. Active retail orders have status 'COMPLETED'."</em>).
+  </p>
+  
+  <form method="post" action="/sources/{{ source.id }}/context/database" style="margin-top:14px">
+    <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
+    <textarea name="description" rows="4" style="resize:vertical;font-size:13px;line-height:1.6" placeholder="Enter high-level database context, domain description, or standing guidelines...">{{ database_context }}</textarea>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+      <span class="muted" style="font-size:12px">Clear text and save to remove this context note.</span>
+      <button>Save Database Context</button>
+    </div>
+  </form>
+</div>
+
+<!-- Card 2: Table-by-Table Context -->
+<div class="card" style="border-left:4px solid var(--accent)">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+    <div style="display:flex;align-items:center;gap:8px">
+      <div style="width:28px;height:28px;border-radius:6px;background:#eff6ff;display:flex;align-items:center;justify-content:center;color:#2563eb;font-weight:700">📑</div>
+      <div>
+        <h3 style="margin:0">Table Context</h3>
+        <span class="muted" style="font-size:12px">Specific table grain, business meaning, active vs archived data, and joining instructions</span>
+      </div>
+    </div>
+    <span class="badge badge-blue">{{ tables|length }} table(s) introspected</span>
+  </div>
+
+  <p class="muted">
+    Provide domain-specific notes for individual tables. AI assistants consult these notes before writing queries or joins against that table.
+  </p>
+
+  {% if tables %}
+  <div id="table-list" style="margin-top:16px">
+    {% for t in tables %}
+    <div style="border:1px solid #e2e8f0;border-radius:var(--radius-md);padding:16px;margin-bottom:14px;background:#ffffff;transition:border-color 0.15s ease">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <strong style="font-size:15px;color:#0f172a">{{ t.full_name }}</strong>
+          <span class="badge {% if t.kind == 'view' %}badge-amber{% else %}badge-blue{% endif %}">{{ t.kind }}</span>
+          <span class="badge" style="font-weight:normal;color:#64748b">{{ t.columns_count }} column(s)</span>
+          {% if t.context %}
+          <span class="badge badge-green" style="font-size:10px">✓ Has Context</span>
+          {% endif %}
+        </div>
+      </div>
+      
+      <form method="post" action="/sources/{{ source.id }}/context/table" style="margin:0">
+        <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
+        <input type="hidden" name="table" value="{{ t.full_name }}">
+        <textarea name="description" rows="2" style="margin:4px 0 8px;font-size:13px;line-height:1.5" placeholder="Describe table grain, active vs archived data, business rules (e.g. 'Orders header. 1 row per transaction bill. Exclude cancelled bills.')...">{{ t.context }}</textarea>
+        <div style="display:flex;justify-content:flex-end">
+          <button style="padding:6px 12px;font-size:12px">Save table note</button>
+        </div>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div style="text-align:center;padding:30px 10px;background:#f8fafc;border-radius:var(--radius-sm);border:1px dashed #cbd5e1">
+    <p class="muted" style="margin-bottom:8px">No tables have been introspected yet for this source.</p>
+    <form class="inline" method="post" action="/sources/{{ source.id }}/refresh">
+      <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
+      <button class="btn-secondary">Refresh schema</button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

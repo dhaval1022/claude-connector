@@ -1,22 +1,25 @@
-"""Run Alembic migrations from code (CLI / tests). Synchronous on purpose: Alembic's async env
-starts its own event loop, so never call this from inside a running loop."""
-from pathlib import Path
+"""Direct database schema creation without Alembic."""
+import asyncio
 
-from alembic import command
-from alembic.config import Config
-
-
-def _config(url: str | None) -> Config:
-    cfg = Config()
-    cfg.set_main_option("script_location", str(Path(__file__).parent / "migrations"))
-    if url:
-        cfg.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
-    return cfg
+from app.config import get_settings
+from app.db.init_db import create_schema
 
 
 def upgrade(url: str | None = None, revision: str = "head") -> None:
-    command.upgrade(_config(url), revision)
+    create_schema(url)
+
+
+def stamp(url: str | None = None, revision: str = "head") -> None:
+    pass
 
 
 def current(url: str | None = None) -> None:
-    command.current(_config(url), verbose=True)
+    pass
+
+
+async def auto_upgrade(url: str | None = None) -> None:
+    """Create schema directly at server startup without Alembic."""
+    target_url = url or get_settings().database_url
+    await asyncio.to_thread(create_schema, target_url)
+
+

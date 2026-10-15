@@ -1,6 +1,7 @@
 import re
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -88,46 +89,57 @@ def _parse_athena(form: dict) -> dict:
     return cfg
 
 
-async def create_source(db: AsyncSession, owner_id: str, name: str, engine: str,
+async def create_source(db: AsyncSession, owner_id: int | str, name: str, engine: str,
                         cfg: dict) -> DataSource:
     name = name.strip()
     if not name or len(name) > 120:
         raise SourceError("Name is required (max 120 characters).")
+    oid = int(owner_id)
     exists = (await db.execute(select(DataSource.id).where(
-        DataSource.owner_id == owner_id, DataSource.name == name))).first()
+        DataSource.created_by == oid, DataSource.database_name == name,
+        DataSource.deleted_at.is_(None)))).first()
     if exists:
         raise SourceError(f"You already have a data source named '{name}'.")
-    source_id = uuid.uuid4().hex
     try:
         if "host" in cfg:
             check_host(cfg["host"])
-        conn = make_connector(source_id, engine, cfg)
+        conn = make_connector("test", engine, cfg)
         await conn.test()
         schema = await conn.introspect()
     except HostBlocked as e:
         raise SourceError(str(e))
     except Exception as e:  # driver errors: scrub credentials
-        SqlConnector.dispose(source_id)
+        SqlConnector.dispose("test")
         raise SourceError(f"Connection failed: {clean_error(e, cfg)}")
-    src = DataSource(id=source_id, owner_id=owner_id, name=name, engine=engine,
-                     config_encrypted=encrypt_config(cfg, source_id), status="ok",
-                     schema_cache=schema, schema_cached_at=datetime.now(timezone.utc))
+    src = DataSource(database_name=name, engine=engine, config_encrypted=b"",
+                     status="ok", schema_cache=schema, created_by=oid)
     db.add(src)
+    await db.flush()
+    src.config_encrypted = encrypt_config(cfg, str(src.id))
     await db.commit()
     return src
 
 
-async def get_owned(db: AsyncSession, owner_id: str, source_id: str) -> DataSource | None:
+async def get_owned(db: AsyncSession, owner_id: int | str, source_id: int | str) -> DataSource | None:
     """The only way tools/UI load a source: always scoped to the owner."""
+    try:
+        sid, oid = int(source_id), int(owner_id)
+    except (ValueError, TypeError):
+        return None
     return (await db.execute(select(DataSource).where(
-        DataSource.id == source_id, DataSource.owner_id == owner_id))).scalar_one_or_none()
+        DataSource.id == sid, DataSource.created_by == oid,
+        DataSource.deleted_at.is_(None)))).scalar_one_or_none()
 
 
 def connector_for(src: DataSource):
-    cfg = decrypt_config(src.config_encrypted, src.id)
+    cfg = decrypt_config(src.config_encrypted, str(src.id))
     if src.engine == "files":
         cfg["schema"] = src.schema_cache  # files are immutable: the cache is the schema
-    return make_connector(src.id, src.engine, cfg)
+        db_path = Path(cfg["db_path"])
+        if not db_path.exists() and cfg.get("s3_db_key"):
+            from app.sources.s3 import download_file_from_s3_sync
+            download_file_from_s3_sync(cfg["s3_db_key"], db_path)
+    return make_connector(str(src.id), src.engine, cfg)
 
 
 async def refresh_schema(db: AsyncSession, src: DataSource) -> dict:
@@ -136,20 +148,31 @@ async def refresh_schema(db: AsyncSession, src: DataSource) -> dict:
         schema = await conn.introspect()
     except Exception as e:
         src.status = "error"
+        src.updated_at = datetime.now(timezone.utc)
         await db.commit()
         raise SourceError(f"Schema refresh failed: {clean_error(e, getattr(conn, 'cfg', None))}")
-    src.schema_cache, src.schema_cached_at, src.status = schema, datetime.now(timezone.utc), "ok"
+    src.schema_cache, src.updated_at, src.status = schema, datetime.now(timezone.utc), "ok"
     await db.commit()
     return schema
 
 
-async def delete_source(db: AsyncSession, owner_id: str, source_id: str) -> bool:
+async def delete_source(db: AsyncSession, owner_id: int | str, source_id: int | str) -> bool:
     src = await get_owned(db, owner_id, source_id)
     if not src:
         return False
-    await db.delete(src)
+    now = datetime.now(timezone.utc)
+    src.deleted_at = now
+    src.deleted_by = int(owner_id)
+    if src.engine == "files":
+        try:
+            cfg = decrypt_config(src.config_encrypted, str(src.id))
+            if cfg.get("s3_prefix"):
+                from app.sources.s3 import delete_s3_prefix
+                await delete_s3_prefix(cfg["s3_prefix"])
+        except Exception:
+            pass
+    registry.dispose(str(src.id), src.engine, str(owner_id))
     await db.commit()
-    registry.dispose(source_id, src.engine, owner_id)
     return True
 
 
@@ -172,7 +195,7 @@ def find_table(schema_cache: dict | None, ref: str) -> tuple[str, str, dict] | N
     return matches[0] if matches else None
 
 
-async def create_file_source(db: AsyncSession, owner_id: str, name: str,
+async def create_file_source(db: AsyncSession, owner_id: int | str, name: str,
                              files: list[tuple[str, "object"]]) -> DataSource:
     """files: [(original filename, async-readable upload with .read(n))]. Files are streamed to
     disk under the size cap, loaded into a DuckDB database, and never executed."""
@@ -184,11 +207,17 @@ async def create_file_source(db: AsyncSession, owner_id: str, name: str,
         raise SourceError("Choose at least one CSV or Excel file.")
     if len(files) > s.max_upload_files:
         raise SourceError(f"At most {s.max_upload_files} files per data source.")
+    oid = int(owner_id)
     if (await db.execute(select(DataSource.id).where(
-            DataSource.owner_id == owner_id, DataSource.name == name))).first():
+            DataSource.created_by == oid, DataSource.database_name == name,
+            DataSource.deleted_at.is_(None)))).first():
         raise SourceError(f"You already have a data source named '{name}'.")
-    source_id = uuid.uuid4().hex
-    folder = registry.source_dir(owner_id, source_id)
+    src = DataSource(database_name=name, engine="files", created_by=oid,
+                     config_encrypted=b"", status="ok", schema_cache=None)
+    db.add(src)
+    await db.flush()
+    source_id = str(src.id)
+    folder = registry.source_dir(str(oid), source_id)
     folder.mkdir(parents=True, exist_ok=True)
     limit = s.max_upload_mb * 1024 * 1024
     saved = []
@@ -214,19 +243,41 @@ async def create_file_source(db: AsyncSession, owner_id: str, name: str,
         cfg = {"db_path": str(folder / "data.duckdb"), "schema": schema}
         conn = make_connector(source_id, "files", cfg)
         await conn.test()
+
+        from app.sources.s3 import is_s3_configured, upload_file_to_s3
+        if is_s3_configured():
+            s3_prefix = f"sources/{oid}/{source_id}/"
+            for p in saved:
+                await upload_file_to_s3(p, f"{s3_prefix}{p.name}")
+                try:
+                    p.unlink(missing_ok=True)
+                except Exception:
+                    pass
+            s3_db_key = f"{s3_prefix}data.duckdb"
+            await upload_file_to_s3(folder / "data.duckdb", s3_db_key)
+            cfg["s3_bucket"] = s.aws_bucket_name
+            cfg["s3_prefix"] = s3_prefix
+            cfg["s3_db_key"] = s3_db_key
     except FileLoadError as e:
-        registry.dispose(source_id, "files", owner_id)
+        registry.dispose(source_id, "files", str(oid))
+        await db.rollback()
         raise SourceError(str(e))
     except SourceError:
-        registry.dispose(source_id, "files", owner_id)
+        registry.dispose(source_id, "files", str(oid))
+        await db.rollback()
         raise
     except Exception as e:
-        registry.dispose(source_id, "files", owner_id)
+        registry.dispose(source_id, "files", str(oid))
+        await db.rollback()
         raise SourceError(f"Could not load files: {clean_error(e)}")
-    src = DataSource(id=source_id, owner_id=owner_id, name=name, engine="files",
-                     config_encrypted=encrypt_config({"db_path": cfg["db_path"]}, source_id),
-                     status="ok", schema_cache=schema,
-                     schema_cached_at=datetime.now(timezone.utc))
-    db.add(src)
+    src.schema_cache = schema
+    stored_cfg = {"db_path": cfg["db_path"]}
+    if "s3_bucket" in cfg:
+        stored_cfg.update({
+            "s3_bucket": cfg["s3_bucket"],
+            "s3_prefix": cfg["s3_prefix"],
+            "s3_db_key": cfg["s3_db_key"],
+        })
+    src.config_encrypted = encrypt_config(stored_cfg, source_id)
     await db.commit()
     return src

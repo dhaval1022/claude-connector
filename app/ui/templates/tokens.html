@@ -1,54 +1,101 @@
 {% extends "base.html" %}
+{% block title %}API Tokens – Medkart Data Connector{% endblock %}
 {% block body %}
-<h2>API tokens</h2>
-<p class="muted">For apps that send a fixed bearer token instead of signing in through the browser (the
-  OpenAI API, some Gemini CLI builds, your own scripts). A token acts as <strong>you</strong> and can
-  use every data source you have enabled for that app. Treat it like a password: use one token per app,
-  and never put it into anything shared (for example a Custom GPT that other people can use).</p>
-{% if error %}<p class="err">{{ error }}</p>{% endif %}
+<div style="margin-bottom:24px">
+  <h2>Personal API Tokens</h2>
+  <p class="muted">For headless apps and scripts that send a static Bearer token (OpenAI API, Gemini CLI headers, custom Python pipelines). Each token inherits your user permissions.</p>
+</div>
+
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
 
 {% if created %}
-<div class="card" style="border-color:#2e7d32">
-  <strong>Token created: {{ created.name }}</strong> (expires {{ created.expires }})
-  <p class="err">Copy it now. It is shown only once and cannot be recovered.</p>
-  <pre style="white-space:pre-wrap;word-break:break-all;background:#f4f4f4;padding:10px">{{ created.snippet }}</pre>
+<div class="card" style="border:1px solid #a7f3d0;background:#f0fdf4;padding:20px">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+    <span style="color:#059669;font-size:18px">✓</span>
+    <strong style="color:#065f46">Token Created: {{ created.name }}</strong>
+    <span class="muted" style="font-size:12px">(expires {{ created.expires }})</span>
+  </div>
+  <p class="err" style="margin:8px 0;background:transparent;border:none;padding:0;font-weight:600">Copy it now. It is shown only once and cannot be recovered.</p>
+  <pre style="white-space:pre-wrap;word-break:break-all;background:#ffffff;border:1px solid #bbf7d0;border-radius:var(--radius-sm);padding:12px;font-size:13px;color:#0f172a">{{ created.snippet }}</pre>
 </div>
 {% endif %}
 
-<table>
-  <tr><th>Name</th><th>Starts with</th><th>For</th><th>Expires</th><th>Last used</th><th></th></tr>
-  {% for t in tokens %}
-  <tr>
-    <td>{{ t.name }}</td><td><code>{{ t.prefix }}…</code></td><td>{{ labels.get(t.provider, t.provider) }}</td>
-    <td>{{ t.expires_at.strftime("%Y-%m-%d") }}{{ " (revoked)" if t.revoked }}</td>
-    <td>{{ t.last_used_at.strftime("%Y-%m-%d %H:%M") if t.last_used_at else "never" }}</td>
-    <td>{% if not t.revoked %}
-      <form class="inline" method="post" action="/account/tokens/{{ t.id }}/revoke"
-            onsubmit="return confirm('Revoke this token? Apps using it stop working immediately.')">
-        <input type="hidden" name="csrf" value="{{ ctx.csrf }}"><button>Revoke</button></form>
-    {% endif %}</td>
-  </tr>
-  {% else %}
-  <tr><td colspan="6" class="muted">No tokens yet.</td></tr>
-  {% endfor %}
-</table>
+<div class="card">
+  <h3 style="margin-bottom:12px">Active API Tokens</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Prefix</th>
+        <th>App / Provider</th>
+        <th>Expires</th>
+        <th>Last Used</th>
+        <th style="text-align:right">Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in tokens %}
+      <tr>
+        <td><strong>{{ t.name }}</strong></td>
+        <td><code>{{ t.prefix }}…</code></td>
+        <td><span class="badge badge-blue">{{ labels.get(t.provider, t.provider) }}</span></td>
+        <td>{{ t.expires_at.strftime("%Y-%m-%d") }}{% if t.revoked %}<span class="badge badge-amber" style="margin-left:6px">(revoked)</span>{% endif %}</td>
+        <td class="muted">{{ t.last_used_at.strftime("%Y-%m-%d %H:%M") if t.last_used_at else "never" }}</td>
+        <td style="text-align:right">
+          {% if not t.revoked %}
+          <form class="inline" method="post" action="/account/tokens/{{ t.id }}/revoke" onsubmit="return confirm('Revoke this token? Apps using it stop working immediately.')">
+            <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
+            <button class="btn-danger" style="padding:4px 10px;font-size:12px">Revoke</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="6" class="muted" style="text-align:center;padding:24px">No API tokens created yet.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 
-<div class="card" style="margin-top:20px">
-  <h3>Create a token</h3>
-  <form method="post" action="/account/tokens">
+<div class="card">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+    <div style="width:28px;height:28px;border-radius:6px;background:#ecfdf5;display:flex;align-items:center;justify-content:center;font-size:15px">🔑</div>
+    <div>
+      <h3 style="margin:0">Create New API Token</h3>
+      <span class="muted" style="font-size:12px">Up to {{ max_active }} active tokens. Remember to assign the token to the specific AI provider.</span>
+    </div>
+  </div>
+
+  <form method="post" action="/account/tokens" style="margin-top:16px">
     <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
-    <input name="name" placeholder="Name (e.g. my Gemini CLI)" required maxlength="80">
-    <label class="muted">Which app will use it?</label>
-    <select name="provider" required>
-      {% for p in providers %}<option value="{{ p }}">{{ labels[p] }}</option>{% endfor %}
-    </select>
-    <label class="muted">Valid for</label>
-    <select name="days">
-      {% for d in lifetimes %}<option value="{{ d }}" {{ "selected" if d == 90 }}>{{ d }} days</option>{% endfor %}
-    </select>
-    <button>Create token</button>
+    
+    <label style="font-size:12px;font-weight:600;color:#475569">Token Description / Name</label>
+    <input name="name" placeholder="e.g. My Gemini CLI or OpenAI Responses Agent" required maxlength="80">
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px">
+      <div>
+        <label style="font-size:12px;font-weight:600;color:#475569">Target AI App</label>
+        <select name="provider" required>
+          {% for p in providers %}
+          <option value="{{ p }}">{{ labels[p] }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label style="font-size:12px;font-weight:600;color:#475569">Expiration</label>
+        <select name="days">
+          {% for d in lifetimes %}
+          <option value="{{ d }}" {{ "selected" if d == 90 }}>{{ d }} days</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div style="margin-top:16px">
+      <button>Create token</button>
+    </div>
   </form>
-  <p class="muted">Up to {{ max_active }} active tokens. A data source is only reachable from an app that its
-    owner enabled on the Data sources page.</p>
 </div>
 {% endblock %}

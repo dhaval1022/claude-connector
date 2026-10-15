@@ -29,7 +29,7 @@ def looks_like_token(value: str) -> bool:
 
 
 def _active_filter(now: datetime):
-    return (ApiToken.revoked.is_(False), ApiToken.expires_at > now)
+    return (ApiToken.revoked.is_(False), ApiToken.expires_at > now, ApiToken.deleted_at.is_(None))
 
 
 async def create_token(db: AsyncSession, owner: User, name: str, provider: str,
@@ -44,11 +44,11 @@ async def create_token(db: AsyncSession, owner: User, name: str, provider: str,
         raise TokenError(f"Lifetime must be one of {', '.join(map(str, LIFETIMES_DAYS))} days.")
     now = datetime.now(timezone.utc)
     active = (await db.execute(select(func.count()).select_from(ApiToken).where(
-        ApiToken.owner_id == owner.id, *_active_filter(now)))).scalar_one()
+        ApiToken.created_by == owner.id, *_active_filter(now)))).scalar_one()
     if active >= MAX_ACTIVE:
         raise TokenError(f"You already have {MAX_ACTIVE} active tokens. Revoke one first.")
     plain = PREFIX + secrets.token_urlsafe(32)
-    row = ApiToken(owner_id=owner.id, name=name, provider=provider, token_hash=sha256(plain),
+    row = ApiToken(created_by=owner.id, name=name, provider=provider, token_hash=sha256(plain),
                    prefix=plain[:8], expires_at=now + timedelta(days=days))
     db.add(row)
     await db.commit()
@@ -60,12 +60,12 @@ async def authenticate_token(db: AsyncSession, plain: str) -> tuple[User, ApiTok
     if not looks_like_token(plain):
         return None
     row = (await db.execute(select(ApiToken).where(
-        ApiToken.token_hash == sha256(plain)))).scalar_one_or_none()
+        ApiToken.token_hash == sha256(plain), ApiToken.deleted_at.is_(None)))).scalar_one_or_none()
     now = datetime.now(timezone.utc)
     if not row or row.revoked or aware(row.expires_at) <= now:
         return None
-    user = await db.get(User, row.owner_id)
-    if not user or not user.is_active:
+    user = await db.get(User, row.created_by)
+    if not user or not user.is_active or user.deleted_at:
         return None
     if row.last_used_at is None or now - aware(row.last_used_at) > LAST_USED_GRANULARITY:
         row.last_used_at = now
@@ -73,16 +73,31 @@ async def authenticate_token(db: AsyncSession, plain: str) -> tuple[User, ApiTok
     return user, row
 
 
-async def list_tokens(db: AsyncSession, owner_id: str) -> list[ApiToken]:
-    return list((await db.execute(select(ApiToken).where(ApiToken.owner_id == owner_id)
-                                  .order_by(ApiToken.created_at.desc()))).scalars())
+async def list_tokens(db: AsyncSession, owner_id: str | int) -> list[ApiToken]:
+    try:
+        oid = int(owner_id)
+    except (ValueError, TypeError):
+        return []
+    return list((await db.execute(select(ApiToken).where(
+        ApiToken.created_by == oid, ApiToken.deleted_at.is_(None)
+    ).order_by(ApiToken.created_at.desc()))).scalars())
 
 
-async def revoke_token(db: AsyncSession, owner_id: str, token_id: str) -> bool:
+async def revoke_token(db: AsyncSession, owner_id: str | int, token_id: str) -> bool:
+    try:
+        oid = int(owner_id)
+    except (ValueError, TypeError):
+        return False
     row = (await db.execute(select(ApiToken).where(
-        ApiToken.id == token_id, ApiToken.owner_id == owner_id))).scalar_one_or_none()
+        ApiToken.id == token_id, ApiToken.created_by == oid,
+        ApiToken.deleted_at.is_(None)))).scalar_one_or_none()
     if not row:
         return False
+    now = datetime.now(timezone.utc)
     row.revoked = True
+    row.deleted_at = now
+    row.deleted_by = oid
+    row.updated_at = now
+    row.updated_by = oid
     await db.commit()
     return True

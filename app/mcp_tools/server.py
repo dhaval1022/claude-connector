@@ -7,6 +7,7 @@ from app.context import current_provider, current_user_id  # noqa: F401  (re-exp
 from app.db.models import DataSource, User
 from app.db.session import SessionLocal
 from app.providers import LABELS, is_allowed
+from app.semantic import service as semantic
 
 mcp = FastMCP(
     "Medkart Data Connector",
@@ -39,8 +40,10 @@ async def list_data_sources() -> dict:
             select(DataSource).where(DataSource.owner_id == current_user_id.get())
             .order_by(DataSource.name))).scalars().all()
     visible = rows if enabled else []
+    db_notes = await semantic.all_database_notes(current_user_id.get()) if enabled else {}
     out: dict = {"data_sources": [
         {"id": r.id, "name": r.name, "engine": r.engine, "status": r.status,
+         **({"context": db_notes[r.id]} if r.id in db_notes else {}),
          "schema_cached_at": r.schema_cached_at.isoformat() if r.schema_cached_at else None}
         for r in visible]}
     hidden = len(rows) - len(visible)

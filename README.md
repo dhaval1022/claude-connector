@@ -155,13 +155,14 @@ async with streamablehttp_client("https://<host>/mcp",
             config=genai.types.GenerateContentConfig(tools=[session]))
 ```
 
-### Which AI apps may see which data
+### Which AI apps may see which data (User-Level Permissions)
 
-Query results are sent to whichever provider you connect, so **every data source has an allow-list of
-apps**, edited on the *Data sources* page. **A new source is Claude-only**; nothing becomes visible to
-OpenAI or Google until its owner ticks that app. It is enforced in every tool call (a test fails if any
-tool that touches a source or an export skips the check), refusals are audited (status `denied`, with the
-app), and `list_data_sources` reports how many sources are hidden from the calling app.
+Query results are sent to whichever provider you connect, so **every user account has an allow-list of
+apps**, managed on the *Connect AI Apps* page (`/account/connect`) and by administrators in *User
+Administration* (`/admin/users`). **A new user is Claude-only by default**; nothing becomes visible to
+OpenAI or Google until enabled. It is enforced in every tool call (a test fails if any tool that touches a
+source or an export skips the check), refusals are audited (status `denied`, with the app), and
+`list_data_sources` reports how many sources are hidden from the calling app.
 
 The app is identified by the callback host for known web clients (`claude.ai`, `chatgpt.com`; a form field
 can't override it), by your choice at sign-in for command-line clients, and by the token's setting for API

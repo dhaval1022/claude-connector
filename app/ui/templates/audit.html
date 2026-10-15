@@ -1,34 +1,70 @@
 {% extends "base.html" %}
+{% block title %}Audit Log – Medkart Data Connector{% endblock %}
 {% block body %}
-<h2>Audit log</h2>
-<p class="muted">Latest 200 tool calls. Result data is never stored, only the SQL and row counts.</p>
-<form method="get" action="/admin/audit" style="display:flex;gap:8px;flex-wrap:wrap">
-  <select name="status" style="width:auto">
-    <option value="">any status</option>
-    {% for s in statuses %}<option {{ "selected" if s == f_status }}>{{ s }}</option>{% endfor %}
-  </select>
-  <input name="tool" placeholder="tool (e.g. run_query)" value="{{ f_tool }}" style="width:auto">
-  <input name="user" placeholder="user email" value="{{ f_user }}" style="width:auto">
-  <button>Filter</button>
-</form>
-<table>
-  <tr><th>Time (UTC)</th><th>User</th><th>Tool</th><th>App</th><th>Status</th><th>Rows</th><th>ms</th>
-      <th>SQL / error</th></tr>
-  {% for r in rows %}
-  <tr>
-    <td>{{ r.ts.strftime("%Y-%m-%d %H:%M:%S") }}</td>
-    <td>{{ emails.get(r.user_id, "-") }}</td>
-    <td>{{ r.tool }}</td>
-    <td>{{ r.provider or "" }}</td>
-    <td class="{{ 'err' if r.status != 'ok' }}">{{ r.status }}</td>
-    <td>{{ r.row_count if r.row_count is not none else "" }}</td>
-    <td>{{ r.elapsed_ms if r.elapsed_ms is not none else "" }}</td>
-    <td style="font-family:monospace;font-size:12px;word-break:break-all">
-      {{ (r.sql_text or "")[:300] }}{% if r.error %}<br><span class="err">{{ r.error[:200] }}</span>{% endif %}
-    </td>
-  </tr>
-  {% else %}
-  <tr><td colspan="8" class="muted">No matching events.</td></tr>
-  {% endfor %}
-</table>
+<div style="margin-bottom:24px">
+  <h2>Audit Log</h2>
+  <p class="muted">Live log of the latest 200 MCP tool calls. Query results are never stored; only metadata, timing, and SQL statements are recorded.</p>
+</div>
+
+<div class="card" style="padding:16px 20px;margin-bottom:18px">
+  <form method="get" action="/admin/audit" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <div style="flex:1;min-width:140px">
+      <select name="status" style="margin:0">
+        <option value="">any status</option>
+        {% for s in statuses %}<option {{ "selected" if s == f_status }}>{{ s }}</option>{% endfor %}
+      </select>
+    </div>
+    <div style="flex:2;min-width:180px">
+      <input name="tool" placeholder="Filter by tool (e.g. run_query)" value="{{ f_tool }}" style="margin:0">
+    </div>
+    <div style="flex:2;min-width:180px">
+      <input name="user" placeholder="Filter by user email" value="{{ f_user }}" style="margin:0">
+    </div>
+    <button style="padding:9px 20px">Filter</button>
+  </form>
+</div>
+
+<div class="card" style="padding:0;overflow:hidden">
+  <table style="margin:0;border:none;box-shadow:none;border-radius:0">
+    <thead>
+      <tr>
+        <th>Time (UTC)</th>
+        <th>User</th>
+        <th>Tool</th>
+        <th>App</th>
+        <th>Status</th>
+        <th>Rows</th>
+        <th>ms</th>
+        <th>SQL / Error</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td class="muted" style="white-space:nowrap;font-size:12px">{{ r.ts.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+        <td>{{ emails.get(r.user_id, "-") }}</td>
+        <td><code>{{ r.tool }}</code></td>
+        <td><span class="badge badge-purple">{{ r.provider or "mcp" }}</span></td>
+        <td>
+          <span class="badge {% if r.status == 'ok' %}badge-green{% elif r.status == 'rejected' %}badge-amber{% else %}badge-red{% endif %}" style="{% if r.status != 'ok' %}background:#fef2f2;color:#dc2626{% endif %}">
+            {{ r.status }}
+          </span>
+        </td>
+        <td>{{ r.row_count if r.row_count is not none else "-" }}</td>
+        <td class="muted">{{ r.elapsed_ms if r.elapsed_ms is not none else "-" }}</td>
+        <td style="font-family:ui-monospace,monospace;font-size:12px;max-width:320px;word-break:break-all">
+          {{ (r.sql_text or "")[:300] }}
+          {% if r.error %}
+          <div style="color:var(--danger);margin-top:4px;font-size:11px">{{ r.error[:200] }}</div>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="8" class="muted" style="text-align:center;padding:32px">No matching events found.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% endblock %}

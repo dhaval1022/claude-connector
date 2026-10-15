@@ -1,72 +1,262 @@
 {% extends "base.html" %}
+{% block title %}Data Sources – Medkart Data Connector{% endblock %}
 {% block body %}
-<h2>My data sources</h2>
-{% if notice %}<p class="ok">{{ notice }}</p>{% endif %}
-{% if error %}<p class="err">{{ error }}</p>{% endif %}
-<p class="muted">Which AI apps can use your data sources is set once for your account on the
-  <a href="/account/connect">Connect</a> page.</p>
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;flex-wrap:wrap;gap:12px">
+  <div>
+    <h2>Connected Data Sources</h2>
+    <p class="muted" style="margin-bottom:0">Databases and files available to your authorized AI assistants. Manage schemas, masking rules, and business context.</p>
+  </div>
+  <a href="/account/connect" class="btn btn-secondary" style="font-size:12px">User AI App Permissions →</a>
+</div>
+
+{% if notice %}<div class="ok">{{ notice }}</div>{% endif %}
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
 
 {% for s in sources %}
-<div class="card">
-  <strong>{{ s.name }}</strong> <span class="muted">· {{ s.engine }} · {{ s.status }}
-    · schema cached {{ s.schema_cached_at.strftime("%Y-%m-%d %H:%M") if s.schema_cached_at else "never" }}
-    · {% set n = namespace(t=0) %}{% for sch in (s.schema_cache.schemas.values() if s.schema_cache else []) %}{% set n.t = n.t + sch|length %}{% endfor %}{{ n.t }} tables</span>
-  <form method="post" action="/sources/{{ s.id }}/masked">
-    <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
-    <label class="muted">Masked columns (Claude cannot read these; comma-separated, e.g. phone,email)</label>
-    <input name="columns" value="{{ (s.masked_columns or [])|join(', ') }}">
-    <button>Save masked columns</button>
-  </form>
-  <form class="inline" method="post" action="/sources/{{ s.id }}/refresh">
-    <input type="hidden" name="csrf" value="{{ ctx.csrf }}"><button>Refresh schema</button></form>
-  <form class="inline" method="post" action="/sources/{{ s.id }}/delete"
-        onsubmit="return confirm('Remove this data source?')">
-    <input type="hidden" name="csrf" value="{{ ctx.csrf }}"><button>Remove</button></form>
+<div class="card" style="position:relative">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+    <div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <h3 style="margin:0;font-size:18px">{{ s.name }}</h3>
+        <span class="badge {% if s.engine == 'files' %}badge-purple{% elif s.engine == 'postgres' %}badge-blue{% elif s.engine == 'athena' %}badge-amber{% else %}badge-green{% endif %}">{{ s.engine }}</span>
+        <span class="badge {% if s.status == 'ready' %}badge-green{% else %}badge-amber{% endif %}">
+          <span class="user-dot" style="background:{% if s.status == 'ready' %}#10b981{% else %}#f59e0b{% endif %}"></span>
+          {{ s.status }}
+        </span>
+      </div>
+      <div class="muted" style="margin-top:5px;font-size:12px">
+        {% set n = namespace(t=0) %}{% for sch in (s.schema_cache.schemas.values() if s.schema_cache else []) %}{% set n.t = n.t + sch|length %}{% endfor %}
+        <strong>{{ n.t }}</strong> table(s) introspected
+        · Schema cached: {{ s.schema_cached_at.strftime("%Y-%m-%d %H:%M UTC") if s.schema_cached_at else "never" }}
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <a href="/sources/{{ s.id }}/context" class="btn" style="background:linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);padding:7px 14px;font-size:12px">
+        Context &amp; notes
+      </a>
+      <form class="inline" method="post" action="/sources/{{ s.id }}/refresh">
+        <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
+        <button class="btn-secondary" style="padding:7px 12px;font-size:12px">Refresh schema</button>
+      </form>
+      <form class="inline" method="post" action="/sources/{{ s.id }}/delete" onsubmit="return confirm('Remove this data source?')">
+        <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
+        <button class="btn-danger" style="padding:7px 12px;font-size:12px">Remove</button>
+      </form>
+    </div>
+  </div>
+
+  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:var(--radius-sm);padding:14px;margin-top:12px">
+    <form method="post" action="/sources/{{ s.id }}/masked" style="margin:0">
+      <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <label style="font-weight:600;font-size:12px;color:#475569;text-transform:uppercase;letter-spacing:0.04em">PII Masked Columns (Deny List)</label>
+        <span class="muted" style="font-size:11px">AI assistants are blocked from querying these columns</span>
+      </div>
+      <div style="display:flex;gap:8px">
+        <input name="columns" value="{{ (s.masked_columns or [])|join(', ') }}" placeholder="e.g. phone, email, ssn, pan_number" style="margin:0;font-size:13px">
+        <button class="btn-secondary" style="white-space:nowrap;padding:7px 14px">Save masked columns</button>
+      </div>
+    </form>
+  </div>
 </div>
 {% else %}
-<p class="muted">No data sources yet. Add one below.</p>
+<div class="card" style="text-align:center;padding:40px 20px;border-style:dashed">
+  <div style="font-size:32px;margin-bottom:8px">🔌</div>
+  <h3 style="margin-bottom:4px">No data sources connected yet</h3>
+  <p class="muted">Connect your database or upload CSV / Excel files below to get started.</p>
+</div>
 {% endfor %}
 
-<div class="card">
-  <h3>Upload CSV / Excel files</h3>
-  <p class="muted">Each CSV becomes a table; each Excel sheet becomes a table. Files are
-    snapshots (re-upload to update). Text codes such as 00123 are kept exactly as written.</p>
-  <form method="post" action="/sources/upload" enctype="multipart/form-data">
-    <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
-    <input name="name" placeholder="Name (e.g. March sales files)" required>
-    <input type="file" name="files" accept=".csv,.txt,.xlsx,.xlsm" multiple required>
-    <button>Upload &amp; load</button>
-  </form>
+<style>
+  main {
+    max-width: 1280px !important;
+  }
+  .source-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    margin-top: 24px;
+    align-items: start;
+  }
+  @media (max-width: 960px) {
+    .source-cards-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<div class="source-cards-grid">
+  <!-- Card 1: Upload Files -->
+  <div class="card" style="margin-bottom:0">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <div style="width:32px;height:32px;border-radius:8px;background:#faf5ff;display:flex;align-items:center;justify-content:center;font-size:16px">📁</div>
+      <div>
+        <h3 style="margin:0">Upload CSV / Excel files</h3>
+        <span class="muted" style="font-size:12px">Loaded into an isolated, read-only DuckDB database</span>
+      </div>
+    </div>
+    <p class="muted">Each CSV becomes a table; each Excel sheet becomes a table. Non-ISO dates and codes (like 00123) are preserved losslessly as text.</p>
+    
+    <form method="post" action="/sources/upload" enctype="multipart/form-data">
+      <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
+      <label style="font-size:12px;font-weight:600;color:#475569">Source Name</label>
+      <input name="name" placeholder="Name (e.g. March sales files)" required>
+      
+      <label style="font-size:12px;font-weight:600;color:#475569">Dataset Overview / Context (optional)</label>
+      <input name="context" placeholder="e.g. Retail sales extracts for Q1 FY25">
+
+      <label style="font-size:12px;font-weight:600;color:#475569">Files (.csv, .xlsx, .xlsm, .txt)</label>
+      <input type="file" name="files" accept=".csv,.txt,.xlsx,.xlsm" multiple required style="background:#f8fafc;padding:8px">
+
+      <div style="margin-top:14px">
+        <button style="width:100%">Upload &amp; load</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Tab / Card 2: Connect Relational Database Card -->
+  <div id="card-sql" class="card" style="margin-bottom:0">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <div style="width:32px;height:32px;border-radius:8px;background:#ecfdf5;display:flex;align-items:center;justify-content:center;font-size:16px">🗄️</div>
+      <div>
+        <h3 style="margin:0">Connect a database</h3>
+        <span class="muted" style="font-size:12px">PostgreSQL, MySQL, SQL Server</span>
+      </div>
+    </div>
+    <p class="muted">Credentials are encrypted with AES-256-GCM and never shared with AI assistants. Always provide a <strong>read-only account</strong>.</p>
+    
+    <form method="post" action="/sources">
+      <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div>
+          <label style="font-size:12px;font-weight:600;color:#475569">Source Name</label>
+          <input name="name" placeholder="e.g. Sales Warehouse" value="{{ form.name if form.engine != 'athena' else '' }}" required>
+        </div>
+        <div>
+          <label style="font-size:12px;font-weight:600;color:#475569">Engine</label>
+          <select name="engine" id="sql-engine-select" onchange="onSqlEngineChange()">
+            {% for key, label in engines.items() if key != "athena" %}
+            <option value="{{ key }}" {{ "selected" if form.engine == key or (not form.engine and key == 'postgres') }}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <label style="font-size:12px;font-weight:600;color:#475569">Dataset / Database Overview Context (optional)</label>
+      <input name="context" placeholder="e.g. Pharmacy ERP retail sales, medicines and inventory" value="{{ form.context if form.engine != 'athena' else '' }}">
+
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
+        <div>
+          <label style="font-size:12px;font-weight:600;color:#475569">Host or IP</label>
+          <input id="input-sql-host" name="host" placeholder="Host or IP" value="{{ form.host if form.engine != 'athena' else '' }}" required>
+        </div>
+        <div>
+          <label style="font-size:12px;font-weight:600;color:#475569">Port</label>
+          <input id="input-sql-port" name="port" placeholder="5432" value="{{ form.port if form.engine != 'athena' else '' }}">
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div>
+          <label style="font-size:12px;font-weight:600;color:#475569">Database Name</label>
+          <input id="input-sql-database" name="database" placeholder="Database name" value="{{ form.database if form.engine != 'athena' else '' }}" required>
+        </div>
+        <div>
+          <label style="font-size:12px;font-weight:600;color:#475569">Username</label>
+          <input id="input-sql-username" name="username" placeholder="Username" value="{{ form.username if form.engine != 'athena' else '' }}" required>
+        </div>
+      </div>
+
+      <label style="font-size:12px;font-weight:600;color:#475569">Password</label>
+      <input id="input-sql-password" name="password" type="password" placeholder="Password" autocomplete="new-password">
+
+      <!-- SQL Server Only: Trust Server Certificate -->
+      <div id="fields-mssql-cert" style="display:{% if form.engine == 'mssql' %}block{% else %}none{% endif %};margin:8px 0">
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="check-trust-cert" name="trust_server_cert" value="1" style="width:auto;margin:0" {{ "checked" if form.trust_server_cert }}>
+          <span>SQL Server: trust server certificate</span>
+        </label>
+      </div>
+
+      <div style="margin-top:14px">
+        <button style="width:100%">Test &amp; connect database</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Tab / Card 3: Amazon Athena Dedicated Card -->
+  <div id="card-athena" class="card" style="margin-bottom:0">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <div style="width:32px;height:32px;border-radius:8px;background:#f0f9ff;display:flex;align-items:center;justify-content:center;font-size:16px">☁️</div>
+      <div>
+        <h3 style="margin:0">Connect Amazon Athena</h3>
+        <span class="muted" style="font-size:12px">AWS Athena, Glue Catalog &amp; S3</span>
+      </div>
+    </div>
+    <p class="muted">Query S3 data lakes via serverless Athena. Use IAM instance roles or explicit read-only AWS credentials.</p>
+    
+    <form method="post" action="/sources">
+      <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
+      <input type="hidden" name="engine" value="athena">
+      
+      <label style="font-size:12px;font-weight:600;color:#475569">Source Name</label>
+      <input name="name" placeholder="e.g. Sales Warehouse Athena" value="{{ form.name if form.engine == 'athena' else '' }}" required>
+
+      <label style="font-size:12px;font-weight:600;color:#475569">Dataset / Database Overview Context (optional)</label>
+      <input name="context" placeholder="e.g. Retail sales analytics and data lake extracts" value="{{ form.context if form.engine == 'athena' else '' }}">
+
+      <label style="font-size:12px;font-weight:600;color:#475569">AWS Glue Database Name</label>
+      <input name="database" placeholder="e.g. analytics_db" value="{{ form.database if form.engine == 'athena' else '' }}" required>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div>
+          <label style="font-size:12px;font-weight:600;color:#475569">AWS Region</label>
+          <input name="region" placeholder="e.g. ap-south-1" value="{{ form.region if form.engine == 'athena' else '' }}" required>
+        </div>
+        <div>
+          <label style="font-size:12px;font-weight:600;color:#475569">Workgroup</label>
+          <input name="workgroup" placeholder="primary" value="{{ form.workgroup if form.engine == 'athena' else 'primary' }}">
+        </div>
+      </div>
+
+      <label style="font-size:12px;font-weight:600;color:#475569">S3 Query Results Location</label>
+      <input name="s3_output" placeholder="s3://your-bucket-name/prefix/" value="{{ form.s3_output if form.engine == 'athena' else '' }}" required>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div>
+          <label style="font-size:12px;font-weight:600;color:#475569">Access Key ID (optional)</label>
+          <input name="access_key_id" placeholder="Leave blank for IAM role" value="{{ form.access_key_id if form.engine == 'athena' else '' }}" autocomplete="off">
+        </div>
+        <div>
+          <label style="font-size:12px;font-weight:600;color:#475569">Secret Access Key (optional)</label>
+          <input name="secret_access_key" type="password" placeholder="Secret access key" autocomplete="new-password">
+        </div>
+      </div>
+
+      <div style="margin-top:14px">
+        <button style="width:100%;background:linear-gradient(135deg, #0284c7 0%, #0369a1 100%)">Test &amp; connect Athena</button>
+      </div>
+    </form>
+  </div>
 </div>
 
-<div class="card">
-  <h3>Connect a database</h3>
-  <p class="muted">Use a <strong>read-only database account</strong>. The connector only runs
-    SELECT queries, but a read-only account is your strongest safeguard. Credentials are
-    stored encrypted and are never shown to Claude.</p>
-  <form method="post" action="/sources">
-    <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
-    <input name="name" placeholder="Name (e.g. Sales warehouse)" value="{{ form.name }}" required>
-    <select name="engine">
-      {% for key, label in engines.items() %}
-      <option value="{{ key }}" {{ "selected" if form.engine == key }}>{{ label }}</option>
-      {% endfor %}
-    </select>
-    <input name="host" placeholder="Host" value="{{ form.host }}">
-    <input name="port" placeholder="Port (default for engine if empty)" value="{{ form.port }}">
-    <input name="database" placeholder="Database name" value="{{ form.database }}" required>
-    <input name="username" placeholder="Username" value="{{ form.username }}">
-    <input name="password" type="password" placeholder="Password" autocomplete="new-password">
-    <p class="muted" style="margin-bottom:0">Amazon Athena only (leave the host, user and password
-      above empty; "Database name" is the Glue database):</p>
-    <input name="region" placeholder="AWS region (e.g. ap-south-1)" value="{{ form.region }}">
-    <input name="s3_output" placeholder="Query results location (s3://bucket/prefix/)" value="{{ form.s3_output }}">
-    <input name="workgroup" placeholder="Workgroup (default: primary)" value="{{ form.workgroup }}">
-    <input name="access_key_id" placeholder="Access key id (optional; blank = server IAM role)" value="{{ form.access_key_id }}" autocomplete="off">
-    <input name="secret_access_key" type="password" placeholder="Secret access key" autocomplete="new-password">
-    <label><input type="checkbox" name="trust_server_cert" value="1" style="width:auto"
-      {{ "checked" if form.trust_server_cert }}> SQL Server: trust server certificate</label>
-    <button>Test &amp; connect</button>
-  </form>
-</div>
+<script>
+function onSqlEngineChange() {
+  var sel = document.getElementById('sql-engine-select');
+  if (!sel) return;
+  var eng = sel.value;
+  var port = document.getElementById('input-sql-port');
+  var mssqlDiv = document.getElementById('fields-mssql-cert');
+  if (port) {
+    if (eng === 'postgres') port.placeholder = '5432';
+    else if (eng === 'mysql') port.placeholder = '3306';
+    else if (eng === 'mssql') port.placeholder = '1433';
+  }
+  if (mssqlDiv) {
+    mssqlDiv.style.display = (eng === 'mssql') ? 'block' : 'none';
+  }
+}
+
+onSqlEngineChange();
+</script>
 {% endblock %}

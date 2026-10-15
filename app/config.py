@@ -1,12 +1,31 @@
 from functools import lru_cache
 
+from urllib.parse import quote_plus
+
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="CONNECTOR_")
+    model_config = SettingsConfigDict(env_file=".env", env_prefix="CONNECTOR_", extra="ignore")
 
-    database_url: str = "sqlite+aiosqlite:///./connector.db"
+    # AWS S3 Storage for uploaded files
+    aws_bucket_name: str = Field(default="", validation_alias=AliasChoices("AWS_BUCKET_NAME", "CONNECTOR_AWS_BUCKET_NAME"))
+    aws_access_key_id: str = Field(default="", validation_alias=AliasChoices("AWS_ACCESS_KEY_ID", "CONNECTOR_AWS_ACCESS_KEY_ID"))
+    aws_secret_access_key: str = Field(default="", validation_alias=AliasChoices("AWS_SECRET_ACCESS_KEY", "CONNECTOR_AWS_SECRET_ACCESS_KEY"))
+    aws_region: str = Field(default="ap-south-1", validation_alias=AliasChoices("AWS_REGION", "CONNECTOR_AWS_REGION"))
+
+    # Database configuration (PostgreSQL via DB_* or full CONNECTOR_DATABASE_URL)
+    db_host: str = Field(default="", validation_alias=AliasChoices("DB_HOST", "CONNECTOR_DB_HOST"))
+    db_port: int = Field(default=5432, validation_alias=AliasChoices("DB_PORT", "CONNECTOR_DB_PORT"))
+    db_database: str = Field(default="", validation_alias=AliasChoices("DB_DATABASE", "CONNECTOR_DB_DATABASE"))
+    db_user: str = Field(default="", validation_alias=AliasChoices("DB_USER", "CONNECTOR_DB_USER"))
+    db_password: str = Field(default="", validation_alias=AliasChoices("DB_PASSWORD", "CONNECTOR_DB_PASSWORD"))
+
+    database_url: str = Field(
+        default="sqlite+aiosqlite:///./connector.db",
+        validation_alias=AliasChoices("CONNECTOR_DATABASE_URL", "DATABASE_URL")
+    )
     public_base_url: str = "http://localhost:8000"
     # 32-byte key, base64. Encrypts data-source credentials (AES-256-GCM).
     master_key: str = ""
@@ -63,6 +82,15 @@ class Settings(BaseSettings):
     bootstrap_admin_email: str = ""
     bootstrap_admin_password: str = ""
     bootstrap_admin_name: str = "Administrator"
+
+    @model_validator(mode="after")
+    def compute_database_url(self) -> "Settings":
+        if self.db_host and self.db_database:
+            user = quote_plus(self.db_user) if self.db_user else ""
+            pwd = f":{quote_plus(self.db_password)}" if self.db_password else ""
+            auth = f"{user}{pwd}@" if user or pwd else ""
+            self.database_url = f"postgresql+asyncpg://{auth}{self.db_host}:{self.db_port}/{self.db_database}"
+        return self
 
 
 @lru_cache

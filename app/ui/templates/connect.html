@@ -1,44 +1,89 @@
 {% extends "base.html" %}
+{% block title %}Connect AI Apps – Medkart Data Connector{% endblock %}
 {% block body %}
-<h2>Connect an app</h2>
-<p class="muted">Claude and ChatGPT register themselves, so they only need the server URL. Gemini's
-  custom connector form asks for the values below. You then sign in with your own account here.</p>
-{% if notice %}<p class="ok">{{ notice }}</p>{% endif %}
+<div style="margin-bottom:24px">
+  <h2>Connect AI Assistants</h2>
+  <p class="muted">Authorize which AI platforms can access your connected databases and view connection endpoints.</p>
+</div>
 
-<div class="card">
-  <h3>Which AI apps can use my data sources?</h3>
-  <form method="post" action="/account/providers">
+{% if notice %}<div class="ok">{{ notice }}</div>{% endif %}
+
+<!-- Allowed Providers Card -->
+<div class="card" style="border-left:4px solid var(--primary)">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+    <div style="width:28px;height:28px;border-radius:6px;background:#ecfdf5;display:flex;align-items:center;justify-content:center;font-size:15px">🛡️</div>
+    <div>
+      <h3 style="margin:0">User-Level AI App Permissions</h3>
+      <span class="muted" style="font-size:12px">Account-level data governance: authorizes which AI assistants can query any data source you own or access</span>
+    </div>
+  </div>
+  <p class="muted">
+    Permissions apply at your <strong>user account level</strong> across all your data sources. Query results are sent only to the selected AI providers you authorize below.
+  </p>
+
+  <form method="post" action="/account/providers" style="margin-top:14px">
     <input type="hidden" name="csrf" value="{{ ctx.csrf }}">
-    <p class="muted">Applies to all your data sources. Query results are sent to the app's provider.
-      New accounts are Claude-only.</p>
-    {% for key, label in providers.items() %}
-    <label style="margin-right:12px"><input type="checkbox" name="providers" value="{{ key }}"
-      style="width:auto" {{ "checked" if key in enabled }}> {{ label }}</label>
-    {% endfor %}
-    <br><button>Save apps</button>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin:12px 0 16px">
+      {% for key, label in providers.items() %}
+      <label style="display:inline-flex;align-items:center;gap:8px;background:#f8fafc;border:1px solid #e2e8f0;padding:8px 14px;border-radius:var(--radius-sm);cursor:pointer;font-weight:500;font-size:13px">
+        <input type="checkbox" name="providers" value="{{ key }}" style="width:auto" {{ "checked" if key in enabled }}>
+        <span>{{ label }}</span>
+      </label>
+      {% endfor %}
+    </div>
+    <button>Save account permissions</button>
   </form>
 </div>
 
+<!-- Gemini Instructions -->
 <div class="card">
-  <h3>Gemini (Google)</h3>
-  <label class="muted">MCP server URL</label>
-  <input readonly value="{{ mcp_url }}" onclick="this.select()">
-  <label class="muted">OAuth client ID</label>
-  <input readonly value="{{ gemini_client_id }}" onclick="this.select()">
-  <label class="muted">Client secret</label>
-  <p>Leave empty (PKCE is used instead).</p>
-  <label class="muted">Authorization URL</label>
-  <input readonly value="{{ base }}/oauth/authorize" onclick="this.select()">
-  <label class="muted">Token URL</label>
-  <input readonly value="{{ base }}/oauth/token" onclick="this.select()">
-  <p class="muted">When Gemini sends you to the sign-in page, use your Medkart Data Connector email and
-    password. Gemini can only reach data sources whose owner enabled Gemini on the Data sources page.</p>
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+    <div style="width:28px;height:28px;border-radius:6px;background:#eff6ff;display:flex;align-items:center;justify-content:center;font-size:15px">✨</div>
+    <div>
+      <h3 style="margin:0">Gemini (Google)</h3>
+      <span class="muted" style="font-size:12px">Settings for Gemini CLI and Google AI custom connector form</span>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+    <div>
+      <label class="muted" style="font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.04em">MCP Server URL</label>
+      <input readonly value="{{ mcp_url }}" onclick="this.select()" title="Click to copy">
+    </div>
+    <div>
+      <label class="muted" style="font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.04em">OAuth Client ID</label>
+      <input readonly value="{{ gemini_client_id }}" onclick="this.select()" title="Click to copy">
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div>
+      <label class="muted" style="font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.04em">Authorization URL</label>
+      <input readonly value="{{ base }}/oauth/authorize" onclick="this.select()" title="Click to copy">
+    </div>
+    <div>
+      <label class="muted" style="font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.04em">Token URL</label>
+      <input readonly value="{{ base }}/oauth/token" onclick="this.select()" title="Click to copy">
+    </div>
+  </div>
+
+  <div style="margin-top:8px">
+    <label class="muted" style="font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.04em">Client Secret</label>
+    <p class="muted" style="margin:4px 0">Leave empty (PKCE standard is enforced automatically).</p>
+  </div>
 </div>
 
+<!-- Claude / ChatGPT Instructions -->
 <div class="card">
-  <h3>Claude / ChatGPT</h3>
-  <label class="muted">MCP server URL</label>
-  <input readonly value="{{ mcp_url }}" onclick="this.select()">
-  <p class="muted">No client ID needed.</p>
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+    <div style="width:28px;height:28px;border-radius:6px;background:#faf5ff;display:flex;align-items:center;justify-content:center;font-size:15px">🤖</div>
+    <div>
+      <h3 style="margin:0">Claude &amp; ChatGPT</h3>
+      <span class="muted" style="font-size:12px">Automatic registration via MCP discovery</span>
+    </div>
+  </div>
+  <p class="muted">Claude (Desktop / Web) and ChatGPT register themselves dynamically using standard OAuth 2.1 discovery. Simply paste the MCP URL:</p>
+  <label class="muted" style="font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.04em">MCP Server URL</label>
+  <input readonly value="{{ mcp_url }}" onclick="this.select()" title="Click to copy" style="max-width:480px">
 </div>
 {% endblock %}

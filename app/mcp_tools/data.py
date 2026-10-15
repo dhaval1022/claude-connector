@@ -141,12 +141,20 @@ async def get_schema_overview(source_id: str, schema: str | None = None, offset:
     rows = [(s, t, i) for s, t, i in flat_tables(cache)
             if not schema or s.lower() == schema.lower()]
     page = rows[max(offset, 0): max(offset, 0) + min(max(limit, 1), 500)]
+    db_note = await semantic.database_note(current_user_id.get(), src.id)
+    t_notes = await semantic.table_notes_for_source(current_user_id.get(), src.id)
+
+    def _table_context(s: str | None, t: str) -> str | None:
+        return t_notes.get(t.lower()) or (t_notes.get(f"{s}.{t}".lower()) if s else None)
+
     return {"source": src.name, "engine": src.engine,
+            **({"database_context": db_note} if db_note else {}),
             "default_schema": cache.get("default_schema"),
             "schemas": sorted(cache.get("schemas", {})), "total_tables": len(rows),
             "offset": offset,
             "tables": [{"schema": s, "table": t, "kind": i["kind"],
                         "columns": len(i["columns"]),
+                        **({"context": _table_context(s, t)} if _table_context(s, t) else {}),
                         **({"rows": i["rows"]} if "rows" in i else {})}
                        for s, t, i in page],
             "schema_cached_at": src.schema_cached_at.isoformat()
@@ -209,6 +217,7 @@ async def describe_table(source_id: str, table: str, sample_rows: int = 3) -> di
                 c["business_note"] = n
     return {"schema": schema, "table": name, "kind": info["kind"], "columns": cols,
             **({"business_note": notes["table"]} if notes.get("table") else {}),
+            **({"table_context": notes["table"]} if notes.get("table") else {}),
             "primary_key": info["primary_key"], "foreign_keys": info["foreign_keys"],
             "sample": sample, "note": note,
             **({"row_count": info["rows"]} if "rows" in info else {}),
